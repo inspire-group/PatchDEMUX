@@ -1,4 +1,8 @@
-
+# Data #
+########
+PatchCleanser/checkpoints
+PatchCleanser/data
+PatchCleanser/dump
 
 # Compiled source #
 ###################
