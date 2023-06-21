@@ -1,5 +1,4 @@
-# Adopted from: https://github.com/allenai/elastic/blob/master/multilabel_classify.py
-# special thanks to @hellbell
+# Adopted from: https://github.com/Alibaba-MIIL/ASL/blob/main/validate.py
 
 import argparse
 import time
@@ -10,11 +9,14 @@ import torch.utils.data.distributed
 import torchvision.transforms as transforms
 import os
 
-from src.helper_functions.helper_functions import mAP, AverageMeter, CocoDetection
-from src.models import create_model
+import sys
+sys.path.append("ASL/")
+
+from ASL.src.helper_functions.helper_functions import mAP, AverageMeter, CocoDetection
+from ASL.src.models import create_model
 import numpy as np
 
-parser = argparse.ArgumentParser(description='PyTorch ImageNet Training')
+parser = argparse.ArgumentParser(description='Multi-Label PatchCleanser Certification')
 parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--model-name', default='tresnet_l')
 parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
@@ -82,8 +84,12 @@ def validate_multi(val_loader, model, args):
     preds = []
     targets = []
     for i, (input, target) in enumerate(val_loader):
+        # target shape: [batch_size, object_size_channels, number_classes]
         target = target
+
+        # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
+        
         # compute output
         with torch.no_grad():
             output = Sig(model(input.cuda())).cpu()
