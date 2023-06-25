@@ -19,16 +19,15 @@ def gen_1D_mask_set(input_len, patch_len, mask_number):
     mask_stride = int(np.ceil((input_len - patch_len + 1) / mask_number))
     mask_size = patch_len + mask_stride - 1    
 
-    # Generate mask set (maybe rewrite using concatenate...)
+    # Initialize a base mask (i.e., mask is located all the way to the left)
     masks_list = [0] * mask_number
-    for index, start in enumerate(np.arange(mask_number - 1) * mask_stride):
-        mask = np.zeros((input_len, 1))
-        mask[start : start + mask_size] = 1
+    base_mask = np.concatenate((mask_size * [0], (input_len - mask_size) * [1]))[..., np.newaxis].astype(bool)
 
-        masks_list[index] = mask
-    
-    # Account for final mask
-    masks_list[-1] = np.concatenate((np.zeros((input_len - mask_size, 1)), np.ones((mask_size, 1))))
+    # Generate mask set by sliding the mask across the 1D array
+    for k in np.arange(mask_number - 1): masks_list[k] = np.roll(base_mask, k * mask_stride)
+      
+    # Account for final mask (i.e., mask is located all the way to the right)
+    masks_list[-1] = np.concatenate(((input_len - mask_size) * [1], mask_size * [0]))[..., np.newaxis].astype(bool)
 
     return masks_list, mask_size, mask_stride
 
@@ -54,7 +53,7 @@ def gen_mask_set(im_size, patch_size, mask_number):
     width_masks, mask_size[0], mask_stride[0] = gen_1D_mask_set(im_size[0], patch_size[0], mask_number[0])
     height_masks, mask_size[1], mask_stride[1] = gen_1D_mask_set(im_size[1], patch_size[1], mask_number[1])
 
-    # Combine 1D masks to create 2D image masks
-    mask_list = [torch.from_numpy((w_mask @ h_mask.T).astype(bool)).cuda() for w_mask in width_masks for h_mask in height_masks]
+    # Combine 1D masks with matrix OR operation to create 2D image masks
+    mask_list = [torch.from_numpy(w_mask | h_mask.T).cuda() for w_mask in width_masks for h_mask in height_masks]
 
     return mask_list, mask_size, mask_stride

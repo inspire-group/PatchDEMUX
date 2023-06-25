@@ -95,7 +95,6 @@ class AverageMeter(object):
         self.avg = self.sum / self.cnt
         self.ema = self.ema * 0.99 + self.val * 0.01
 
-# Looking online at the datasets.coco.CocoDetection source code, this code is very similar...need to understand what is additionally being done here
 class CocoDetection(datasets.coco.CocoDetection):
     def __init__(self, root, annFile, transform=None, target_transform=None):
         self.root = root

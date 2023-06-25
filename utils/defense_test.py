@@ -20,22 +20,15 @@ def gen_1D_mask_set(input_len, patch_len, mask_number):
     mask_stride = int(np.ceil((input_len - patch_len + 1) / mask_number))
     mask_size = patch_len + mask_stride - 1    
 
-    # Generate mask set (maybe rewrite using concatenate...)
-    # masks_list = [0] * mask_number
-    # base_mask = np.concatenate((mask_size * [0], (input_size - mask_size) * [1]))[..., np.newaxis].astype(bool)
-    # for k in np.arange(mask_number - 1):
-    #     masks_list[k] = np.roll(base_mask, k * mask_stride)
-      
+    # Initialize a base mask (i.e., mask is located all the way to the left)
     masks_list = [0] * mask_number
-    for index, start in enumerate(np.arange(mask_number - 1) * mask_stride):
-        mask = np.ones((input_len, 1))
-        mask[start : start + mask_size] = 0
+    base_mask = np.concatenate((mask_size * [0], (input_len - mask_size) * [1]))[..., np.newaxis].astype(bool)
 
-        masks_list[index] = mask.astype(bool)
-    
-    # Account for final mask
-    # masks_list[-1] = np.concatenate(((input_size - mask_size) * [1], mask_size * [0]))[..., np.newaxis].astype(bool)
-    masks_list[-1] = np.concatenate((np.ones((input_len - mask_size, 1)), np.zeros((mask_size, 1)))).astype(bool)
+    # Generate mask set by sliding the mask across the 1D array
+    for k in np.arange(mask_number - 1): masks_list[k] = np.roll(base_mask, k * mask_stride)
+      
+    # Account for final mask (i.e., mask is located all the way to the right)
+    masks_list[-1] = np.concatenate(((input_len - mask_size) * [1], mask_size * [0]))[..., np.newaxis].astype(bool)
 
     return masks_list, mask_size, mask_stride
 
@@ -61,7 +54,7 @@ def gen_mask_set(im_size, patch_size, mask_number):
     width_masks, mask_size[0], mask_stride[0] = gen_1D_mask_set(im_size[0], patch_size[0], mask_number[0])
     height_masks, mask_size[1], mask_stride[1] = gen_1D_mask_set(im_size[1], patch_size[1], mask_number[1])
 
-    # Combine 1D masks to create 2D image masks
+    # Combine 1D masks with matrix OR operation to create 2D image masks
     mask_list = [torch.from_numpy(w_mask | h_mask.T).cuda() for w_mask in width_masks for h_mask in height_masks]
 
     return mask_list, mask_size, mask_stride
@@ -112,18 +105,12 @@ def gen_mask_set_OLD(args,ds_config):
     return mask_list,MASK_SIZE,MASK_STRIDE
 
 # New code
-im_size = [224, 224]
-patch_size = [32, 32]
+im_size = [448, 448]
+patch_size = [64, 64]
 mask_number = [6, 6]
 
-# import time
-
-# t0 = time.time()
 mask_list, mask_size, mask_stride = gen_mask_set(im_size, patch_size, mask_number)
-# t1 = time.time()
-# print(f"my method: {t1 - t0}")
 
-import time
 # Old code
 @dataclass
 class Args:
@@ -133,13 +120,11 @@ class Args:
     pa: int = 0
     pb: int = 0
 
-args = Args(32, 6)
-ds_config = {"input_size":[3, 224, 224]}
+args = Args(0, mask_number[0], -1, patch_size[0], patch_size[1])
+ds_config = {"input_size":[3, im_size[0], im_size[1]]}
 
-# t0 = time.time()
 mask_list_OLD, mask_size_OLD, mask_stride_OLD = gen_mask_set_OLD(args,ds_config)
-# t1 = time.time()
-# print(f"old method: {t1 - t0}")
 
-total_sum = np.sum([np.sum((mask_list_OLD[i][0, 0] ^ mask_list[i]).cpu().numpy().astype(int)) for i in range(mask_number[0] * mask_number[1])])
-print(f"total sum of errors: {total_sum}")
+# Determine errors
+total_errors_sum = np.sum([np.sum((mask_list_OLD[i][0, 0] ^ mask_list[i]).cpu().numpy().astype(int)) for i in range(mask_number[0] * mask_number[1])])
+print(f"total sum of errors: {total_errors_sum}")
