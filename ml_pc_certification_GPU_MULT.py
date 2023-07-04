@@ -42,49 +42,44 @@ parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 
 # Mask set specifics
 parser.add_argument('--patch-size', default=64, type=int, help='patch size (default: 64)')
-parser.add_argument('--mask-number-first-round', default=6, type=int, help='mask number first round (default: 6)')
-parser.add_argument('--mask-number-second-round', default=6, type=int, help='mask number second round (default: 6)')
-
-# GPU info for parallelism
-parser.add_argument('--node-number', default=0, type=int, help='number associated with GPU node (default: 0)')
-parser.add_argument('--total-num-gpu', default=1, type=int, help='total number of GPUs (default: 1)')
-parser.add_argument('--gpu-per-node', default=4, type=int, help='number of GPUs per node (default: 4)')
+parser.add_argument('--mask-number', default=6, type=int, help='mask number (default: 6)')
 
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
 parser.add_argument('--print-freq', '-p', default=64, type=int, help='print frequency (default: 64)')
 
-def file_print(file_path, msg):
-    with open(file_path, "a") as f:
-        print(msg, flush=True, file=f) 
+def main(rank, world_size):
 
-def main():
+    # os.environ["MASTER_ADDR"] = "localhost"
+    # os.environ["MASTER_PORT"] = "12355"
+    #os.environ['CUDA_VISIBLE_DEVICES'] = "0, 1"
+
+    # Create process group
+    dist.init_process_group("nccl", rank=rank, world_size=world_size)
+
     args = parser.parse_args()
-    args.batch_size = args.batch_size   
-
-    # Get GPU id
-    cuda_num = os.environ["CUDA_VISIBLE_DEVICES"]
-    world_gpu_id = int(cuda_num) + args.node_number * args.gpu_per_node
+    args.batch_size = args.batch_size
 
     # Construct file path for saving metrics
-    foldername = f"dump/certification/{args.dataset_name}/patch_{args.patch_size}_masknum_{args.mask_number}/{todaystring}/trial_{args.trial}/gpu_world_id_{world_gpu_id}/"
+    foldername = f"dump/certification/{args.dataset_name}/patch_{args.patch_size}_masknum_{args.mask_number}/{todaystring}/trial_{args.trial}/"
     Path(foldername).mkdir(parents=True, exist_ok=True)
     args.save_dir = foldername
-    args.logging_file = foldername + "logging.txt"
 
-    # Setup model
-    file_print(args.logging_file, 'creating and loading the model...')
+    # setup model
+    print('creating and loading the model...')
     state = torch.load(args.model_path, map_location='cpu')
     args.num_classes = state['num_classes']
     args.do_bottleneck_head = False
-    args.rank = 0
+    args.rank = rank
+    # model = create_model(args).cuda()
 
-    # Create model
-    model = create_model(args).cuda()
+    print(f"Rank before create model is: {rank}")
+
+    model = create_model(args).to(rank)
     model.load_state_dict(state['model'], strict=True)
     model.eval()
     classes_list = np.array(list(state['idx_to_class'].values()))
-    file_print(args.logging_file, 'done\n')
+    print('done\n')
 
     # Data loading code
     normalize = transforms.Normalize(mean=[0, 0, 0],
@@ -100,27 +95,18 @@ def main():
                                     normalize,
                                 ]))
 
-    # Compute number of batches per GPU
-    num_batches = np.ceil(len(val_dataset) / args.batch_size).astype(int)
-    num_batches_gpu = np.floor(num_batches / args.total_num_gpu).astype(int)
+    print("len(val_dataset)): ", len(val_dataset))
 
-    # Create GPU specific dataset
-    start_idx = world_gpu_id * num_batches_gpu * args.batch_size
-    end_idx = start_idx + num_batches_gpu * args.batch_size if world_gpu_id != (args.total_num_gpu - 1) else len(val_dataset)
-    gpu_val_dataset = torch.utils.data.Subset(val_dataset, list(range(start_idx, end_idx)))
-    file_print(args.logging_file, "listing out info about this GPU process...")
-    file_print(args.logging_file, f"length of gpu_val_dataset: {len(gpu_val_dataset)}")
-    file_print(args.logging_file, f"batch is currently at: {(int)(start_idx / args.batch_size)}")
-    file_print(args.logging_file, f"start_idx: {start_idx}")
-    file_print(args.logging_file, f"end_idx: {end_idx}\n")
-
-    val_loader = torch.utils.data.DataLoader(
-        gpu_val_dataset, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+    gpu_val_dataset = torch.utils.data.Subset(val_dataset, list(range(50 * rank, 50 * (rank + 1))))
 
     # val_loader = torch.utils.data.DataLoader(
     #     val_dataset, batch_size=args.batch_size, shuffle=False,
     #     num_workers=args.workers, pin_memory=True)
+
+
+    val_loader = torch.utils.data.DataLoader(
+        gpu_val_dataset, batch_size=args.batch_size, shuffle=False,
+        num_workers=args.workers, pin_memory=True)
 
     # Create R-covering set of masks
     im_size = [args.image_size, args.image_size]
@@ -130,8 +116,11 @@ def main():
 
     validate_multi(model, val_loader, classes_list, mask_list, args)
 
+    dist.destroy_process_group()
+
+
 def validate_multi(model, val_loader, classes_list, mask_list, args):
-    file_print(args.logging_file, "starting actual validation...")
+    print("starting actual validation")
 
     Sig = torch.nn.Sigmoid()
 
@@ -145,24 +134,38 @@ def validate_multi(model, val_loader, classes_list, mask_list, args):
     # target shape: [batch_size, object_size_channels, number_classes]
     for batch_index, (input, target) in enumerate(val_loader):
 
-        file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
+        if args.rank == 0:
+            print(f'Batch: [{batch_index}/{len(val_loader)}]')
+    
+        if (batch_index == 1):
+            break
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
-
+        
         im = input
         target = target.cpu().numpy()
-        all_preds = np.zeros([im.shape[0], num_masks * num_masks, num_classes])
+
+        all_preds = np.zeros([args.batch_size, num_masks * num_masks, num_classes])
+
         for i, mask1 in enumerate(mask_list):
             mask1 = mask1.reshape(1, 1, *mask1.shape).to(args.rank)
+
+            if (args.rank == 0):
+                print(f"the rank 0 mask1 is: {i}")
             
-            file_print(args.logging_file, f"Certification is {(i / num_masks) * 100:0.2f}% complete!")
+            if (args.rank == 1):
+                print(f"the rank 1 mask1 is: {i}")
+
             for j, mask2 in enumerate(mask_list):
                 mask2 = mask2.reshape(1, 1, *mask2.shape).to(args.rank)
+
+                # masked_im = torch.where(torch.logical_and(mask1, mask2), im.cuda(), torch.tensor(0.0).cuda())
                 masked_im = torch.where(torch.logical_and(mask1, mask2), im.to(args.rank), torch.tensor(0.0).to(args.rank))
 
                 # compute output
                 with torch.no_grad():
+                    # output = Sig(model(masked_im).cuda()).cpu()
                     output = Sig(model(masked_im).to(args.rank)).cpu()
 
                 pred = output.data.gt(args.thre).long()
@@ -183,15 +186,25 @@ def validate_multi(model, val_loader, classes_list, mask_list, args):
         precision_o, recall_o = metrics.overallPrecision(), metrics.overallRecall()
         precision_c, recall_c = metrics.averageClassPrecision(), metrics.averageClassRecall()
 
-        file_print(args.logging_file, f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f}\n')
+        if (args.rank == 0): 
+            print(f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f}\n')
 
     # Save the certified TP, TN, FN, FP
-    np.savez(args.save_dir + f"certified_metrics", TP=metrics.TP, TN=metrics.TN, FN=metrics.FN, FP=metrics.FP)
+    if (args.rank == 0):
+        np.savez(args.save_dir + "certified_metrics", TP=metrics.TP, TN=metrics.TN, FN=metrics.FN, FP=metrics.FP)
 
-    # Save the precision and recall metrics
-    with open(args.save_dir + f"performance_metrics.txt", "w") as f:
-        f.write(f"P_O: {precision_o:.2f} \t R_O: {recall_o:.2f}\n")
-        f.write(f"P_C: {precision_c:.2f} \t R_C: {recall_c:.2f}")
+        # Save the precision and recall metrics
+        with open(args.save_dir + "performance_metrics.txt", "w") as f:
+            f.write(f"P_O: {precision_o:.2f} \t R_O: {recall_o:.2f}\n")
+            f.write(f"P_C: {precision_c:.2f} \t R_C: {recall_c:.2f}")
+
+    if (args.rank == 1):
+        np.savez(args.save_dir + "certified_metrics1", TP=metrics.TP, TN=metrics.TN, FN=metrics.FN, FP=metrics.FP)
+
+        # Save the precision and recall metrics
+        with open(args.save_dir + "performance_metrics1.txt", "w") as f:
+            f.write(f"P_O: {precision_o:.2f} \t R_O: {recall_o:.2f}\n")
+            f.write(f"P_C: {precision_c:.2f} \t R_C: {recall_c:.2f}")
 
 # CHECK WHY THE ORDER OF IMAGES IS WRONG!!!
 # CHECK HOW METRICS DO WITH LARGER BATCH!!!
@@ -260,4 +273,5 @@ def validate_multi(model, val_loader, classes_list, mask_list, args):
     return
 
 if __name__ == '__main__':
-    main()
+    world_size = 2  # number of gpus to parallize over
+    mp.spawn(main, args=(world_size, ), nprocs=world_size, join=True)

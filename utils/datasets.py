@@ -41,7 +41,7 @@ class CocoDetection(datasets.coco.CocoDetection):
                 output[2][self.cat2cat[obj['category_id']]] = 1     # one-hot target for large objects
         target = output
 
-        # Parse image path from instances.json file, then use cv2 to import the image
+        # Parse image path from instances.json file, then use PIL to import the image
         path = coco.loadImgs(img_id)[0]['file_name']
         img = Image.open(os.path.join(self.root, path)).convert('RGB')
         if self.transform is not None:

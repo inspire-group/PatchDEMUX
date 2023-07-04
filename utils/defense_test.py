@@ -106,7 +106,7 @@ def gen_mask_set_OLD(args,ds_config):
 
 # New code
 im_size = [448, 448]
-patch_size = [64, 64]
+patch_size = [32, 32]
 mask_number = [6, 6]
 
 mask_list, mask_size, mask_stride = gen_mask_set(im_size, patch_size, mask_number)
