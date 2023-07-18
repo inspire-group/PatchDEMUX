@@ -3,7 +3,7 @@
 PatchCleanser/checkpoints
 PatchCleanser/data
 PatchCleanser/dump
-ASL/checkpoints
+checkpoints
 dump
 
 # Compiled source #

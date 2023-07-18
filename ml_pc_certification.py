@@ -42,16 +42,16 @@ parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 
 # Mask set specifics
 parser.add_argument('--patch-size', default=64, type=int, help='patch size (default: 64)')
-parser.add_argument('--mask-number-first-round', default=6, type=int, help='mask number first round (default: 6)')
-parser.add_argument('--mask-number-second-round', default=6, type=int, help='mask number second round (default: 6)')
+parser.add_argument('--mask-number-fr', default=6, type=int, help='mask number first round (default: 6)')
+parser.add_argument('--mask-number-sr', default=6, type=int, help='mask number second round (default: 6)')
 
 # GPU info for parallelism
-parser.add_argument('--node-number', default=0, type=int, help='number associated with GPU node (default: 0)')
+parser.add_argument('--world-gpu-id', default=0, type=int, help='overall GPU id (default: 0)')
 parser.add_argument('--total-num-gpu', default=1, type=int, help='total number of GPUs (default: 1)')
-parser.add_argument('--gpu-per-node', default=4, type=int, help='number of GPUs per node (default: 4)')
 
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
+parser.add_argument('--trial-type', default="vanilla", type=str, help='type of checkpoints used with the trial (default: vanilla/unmodified)')
 parser.add_argument('--print-freq', '-p', default=64, type=int, help='print frequency (default: 64)')
 
 def file_print(file_path, msg):
@@ -63,11 +63,10 @@ def main():
     args.batch_size = args.batch_size   
 
     # Get GPU id
-    cuda_num = os.environ["CUDA_VISIBLE_DEVICES"]
-    world_gpu_id = int(cuda_num) + args.node_number * args.gpu_per_node
+    world_gpu_id = args.world_gpu_id
 
     # Construct file path for saving metrics
-    foldername = f"dump/certification/{args.dataset_name}/patch_{args.patch_size}_masknum_{args.mask_number}/{todaystring}/trial_{args.trial}/gpu_world_id_{world_gpu_id}/"
+    foldername = f"dump/certification/{args.dataset_name}/patch_{args.patch_size}_masknumfr_{args.mask_number_fr}_masknumsr_{args.mask_number_sr}/{todaystring}/trial_{args.trial}_{args.trial_type}/gpu_world_id_{args.world_gpu_id}/"
     Path(foldername).mkdir(parents=True, exist_ok=True)
     args.save_dir = foldername
     args.logging_file = foldername + "logging.txt"
@@ -118,26 +117,30 @@ def main():
         gpu_val_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
-    # val_loader = torch.utils.data.DataLoader(
-    #     val_dataset, batch_size=args.batch_size, shuffle=False,
-    #     num_workers=args.workers, pin_memory=True)
-
-    # Create R-covering set of masks
+    # Create R-covering set of masks for both the first and second rounds
     im_size = [args.image_size, args.image_size]
     patch_size = [args.patch_size, args.patch_size]
-    mask_number = [args.mask_number, args.mask_number]
-    mask_list, mask_size, mask_stride = gen_mask_set(im_size, patch_size, mask_number)
+    mask_number_fr = [args.mask_number_fr, args.mask_number_fr]
+    mask_list_fr, mask_size_fr, mask_stride_fr = gen_mask_set(im_size, patch_size, mask_number_fr)
 
-    validate_multi(model, val_loader, classes_list, mask_list, args)
+    mask_round_equal = False
+    if(args.mask_number_fr != args.mask_number_sr):
+        mask_number_sr = [args.mask_number_sr, args.mask_number_sr]
+        mask_list_sr, mask_size_sr, mask_stride_sr = gen_mask_set(im_size, patch_size, mask_number_sr)
+    else:
+        mask_list_sr = mask_list_fr
+        mask_round_equal = True
 
-def validate_multi(model, val_loader, classes_list, mask_list, args):
+    validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args)
+
+def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args):
     file_print(args.logging_file, "starting actual validation...")
 
     Sig = torch.nn.Sigmoid()
 
     preds = []
     targets = []
-    num_masks = len(mask_list)
+    num_masks_fr, num_masks_sr = len(mask_list_fr), len(mask_list_sr)
     num_classes = len(classes_list)
 
     metrics = PerformanceMetrics(num_classes)
@@ -149,15 +152,17 @@ def validate_multi(model, val_loader, classes_list, mask_list, args):
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
-
         im = input
         target = target.cpu().numpy()
-        all_preds = np.zeros([im.shape[0], num_masks * num_masks, num_classes])
-        for i, mask1 in enumerate(mask_list):
-            mask1 = mask1.reshape(1, 1, *mask1.shape).to(args.rank)
-            
-            file_print(args.logging_file, f"Certification is {(i / num_masks) * 100:0.2f}% complete!")
-            for j, mask2 in enumerate(mask_list):
+
+        # Initialize all_preds to -1 in order to filter out unused mask combinations at the end
+        all_preds = np.zeros([im.shape[0], num_masks_fr * num_masks_sr, num_classes]) - 1
+        for i, mask1 in enumerate(mask_list_fr):
+            mask1 = mask1.reshape(1, 1, *mask1.shape).to(args.rank)            
+            start = i if mask_round_equal else 0
+
+            file_print(args.logging_file, f"Certification is {(i / num_masks_fr) * 100:0.2f}% complete!")
+            for j, mask2 in enumerate(mask_list_sr[start:]):
                 mask2 = mask2.reshape(1, 1, *mask2.shape).to(args.rank)
                 masked_im = torch.where(torch.logical_and(mask1, mask2), im.to(args.rank), torch.tensor(0.0).to(args.rank))
 
@@ -166,8 +171,12 @@ def validate_multi(model, val_loader, classes_list, mask_list, args):
                     output = Sig(model(masked_im).to(args.rank)).cpu()
 
                 pred = output.data.gt(args.thre).long()
-                all_preds[:, i * num_masks + j] = pred.cpu().numpy()
+                all_preds[:, i * num_masks_sr + j] = pred.cpu().numpy()
         
+        # Filter out unused mask combinations
+        duplicate_filter = np.all(all_preds == -1, axis=(0,2))
+        all_preds = all_preds[:, np.logical_not(duplicate_filter), :]
+
         # Find which classes had consensus in masked predictions
         all_preds_ones = np.all(all_preds, axis=1)
         all_preds_zeros = np.all(np.logical_not(all_preds), axis=1)
@@ -192,70 +201,6 @@ def validate_multi(model, val_loader, classes_list, mask_list, args):
     with open(args.save_dir + f"performance_metrics.txt", "w") as f:
         f.write(f"P_O: {precision_o:.2f} \t R_O: {recall_o:.2f}\n")
         f.write(f"P_C: {precision_c:.2f} \t R_C: {recall_c:.2f}")
-
-# CHECK WHY THE ORDER OF IMAGES IS WRONG!!!
-# CHECK HOW METRICS DO WITH LARGER BATCH!!!
-# ENSURE THAT THE MASKED PREDICTIONS ARE CORRECT - USE VISUALIZATION SCRIPT TO CHECK
-#########################################################
-
-        # tp += (pred + target).eq(2).sum(dim=0)
-        # fp += (pred - target).eq(1).sum(dim=0)
-        # fn += (pred - target).eq(-1).sum(dim=0)
-        # tn += (pred + target).eq(0).sum(dim=0)
-        # count += input.size(0)
-
-        # this_tp = (pred + target).eq(2).sum()
-        # this_fp = (pred - target).eq(1).sum()
-        # this_fn = (pred - target).eq(-1).sum()
-        # this_tn = (pred + target).eq(0).sum()
-
-        # this_prec = this_tp.float() / (
-        #     this_tp + this_fp).float() * 100.0 if this_tp + this_fp != 0 else 0.0
-        # this_rec = this_tp.float() / (
-        #     this_tp + this_fn).float() * 100.0 if this_tp + this_fn != 0 else 0.0
-
-        # prec.update(float(this_prec), input.size(0))
-        # rec.update(float(this_rec), input.size(0))
-
-        # # measure elapsed time
-        # batch_time.update(time.time() - end)
-        # end = time.time()
-
-        # p_c = [float(tp[i].float() / (tp[i] + fp[i]).float()) * 100.0 if tp[
-        #                                                                      i] > 0 else 0.0
-        #        for i in range(len(tp))]
-        # r_c = [float(tp[i].float() / (tp[i] + fn[i]).float()) * 100.0 if tp[
-        #                                                                      i] > 0 else 0.0
-        #        for i in range(len(tp))]
-        # f_c = [2 * p_c[i] * r_c[i] / (p_c[i] + r_c[i]) if tp[i] > 0 else 0.0 for
-        #        i in range(len(tp))]
-
-        # mean_p_c = sum(p_c) / len(p_c)
-        # mean_r_c = sum(r_c) / len(r_c)
-        # mean_f_c = sum(f_c) / len(f_c)
-
-        # p_o = tp.sum().float() / (tp + fp).sum().float() * 100.0
-        # r_o = tp.sum().float() / (tp + fn).sum().float() * 100.0
-        # f_o = 2 * p_o * r_o / (p_o + r_o)
-
-        # if i % args.print_freq == 0:
-        #     print('Test: [{0}/{1}]\t'
-        #           'Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-        #           'Precision {prec.val:.2f} ({prec.avg:.2f})\t'
-        #           'Recall {rec.val:.2f} ({rec.avg:.2f})'.format(
-        #         i, len(val_loader), batch_time=batch_time,
-        #         prec=prec, rec=rec))
-        #     print(
-        #         'P_C {:.2f} R_C {:.2f} F_C {:.2f} P_O {:.2f} R_O {:.2f} F_O {:.2f}'
-        #             .format(mean_p_c, mean_r_c, mean_f_c, p_o, r_o, f_o))
-
-    # print(
-    #     '--------------------------------------------------------------------')
-    # print(' * P_C {:.2f} R_C {:.2f} F_C {:.2f} P_O {:.2f} R_O {:.2f} F_O {:.2f}'
-    #       .format(mean_p_c, mean_r_c, mean_f_c, p_o, r_o, f_o))
-
-    # mAP_score = mAP(torch.cat(targets).numpy(), torch.cat(preds).numpy())
-    # print("mAP score:", mAP_score)
 
     return
 

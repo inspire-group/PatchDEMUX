@@ -3,7 +3,7 @@ import torch
 import argparse
 from pathlib import Path
 
-from metrics import PerformanceMetrics
+from utils.metrics import PerformanceMetrics
 
 parser = argparse.ArgumentParser(description='Multi-Label PatchCleanser Certification Metrics Merge')
 
