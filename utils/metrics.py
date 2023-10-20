@@ -36,6 +36,12 @@ class PerformanceMetrics:
         total_FN = self.FN.sum()
         return total_TP / (total_TP + total_FN) * 100 if total_TP > 0 else 0.0
 
+    # Compute overall false positive rate
+    def overallFPR(self):
+        total_FP = self.FP.sum()
+        total_TN = self.TN.sum()
+        return total_FP / (total_FP + total_TN) * 100 if total_FP > 0 else 0.0
+
     # Compute precision of a single class
     def classPrecision(self, index):
         if (not isinstance(index, int)):
@@ -53,6 +59,15 @@ class PerformanceMetrics:
         class_TP = self.TP[index]
         class_FN = self.FN[index]
         return class_TP / (class_TP + class_FN) * 100 if class_TP > 0 else 0.0
+    
+    # Compute false positive rate of a single class
+    def classFPR(self, index):
+        if (not isinstance(index, int)):
+            raise ValueError('Index must be an integer')
+            
+        class_FP = self.FP[index]
+        class_TN = self.TN[index]
+        return class_FP / (class_FP + class_TN) * 100 if class_FP > 0 else 0.0
 
     # Compute average precision over all classes
     def averageClassPrecision(self):

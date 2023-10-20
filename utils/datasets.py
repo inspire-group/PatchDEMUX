@@ -1,5 +1,3 @@
-# Adopted from: https://github.com/Alibaba-MIIL/ASL/blob/main/src/helper_functions/helper_functions.py
-
 import numpy as np
 from PIL import Image
 from torchvision import datasets as datasets
@@ -7,6 +5,33 @@ import torch
 from pycocotools.coco import COCO
 import os
 
+def split_dataset_gpu(dataset, batch_size, total_num_gpu, world_gpu_id):
+    # split a PyTorch dataset into subsets for different GPUs
+    '''
+    INPUT:
+    dataset          the dataset (torchvision.datasets)
+    batch_size       number of images in a batch (int)
+    total_num_gpu    total number of available GPUs to split across (int)
+    world_gpu_id     the GPU for which to generate a dataset subset (int)
+
+    OUTPUT:
+    gpu_dataset      the generated dataset subset (torch.utils.data.Subset)
+    start_idx        starting image index for gpu_dataset (int)
+    end_idx          final image index for gpu_dataset (int)
+    '''
+
+    # Compute number of batches per GPU
+    num_batches = np.ceil(len(dataset) / batch_size).astype(int)
+    num_batches_gpu = np.floor(num_batches / total_num_gpu).astype(int)
+
+    # Create GPU specific dataset
+    start_idx = world_gpu_id * num_batches_gpu * batch_size
+    end_idx = start_idx + num_batches_gpu * batch_size if world_gpu_id != (total_num_gpu - 1) else len(dataset)
+    gpu_dataset = torch.utils.data.Subset(dataset, list(range(start_idx, end_idx)))
+
+    return gpu_dataset, start_idx, end_idx
+
+# Adopted from: https://github.com/Alibaba-MIIL/ASL/blob/main/src/helper_functions/helper_functions.py
 class CocoDetection(datasets.coco.CocoDetection):
     def __init__(self, root, annFile, transform=None, target_transform=None):
         self.root = root

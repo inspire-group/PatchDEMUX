@@ -24,6 +24,11 @@ import sys
 sys.path.append("packages/ASL/")
 from packages.ASL.src.models import create_model
 
+
+sys.path.append("packages/ZITS_inpainting/")
+from packages.ZITS_inpainting.src.FTR_trainer import ZITSforMSCOCO
+from packages.ZITS_inpainting.src.config import Config
+
 parser = argparse.ArgumentParser(description='Multi-Label PatchCleanser Certification')
 
 # Dataset specifics
@@ -39,6 +44,7 @@ parser.add_argument('-b', '--batch-size', default=32, type=int, help='mini-batch
 parser.add_argument('--model-name', default='tresnet_l')
 parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
+parser.add_argument('--config-path', default='./packages/ZITS_inpainting/ckpt/config_ZITS_places2_WIREFRAME_TEST.yml', type=str)
 
 # Mask set specifics
 parser.add_argument('--patch-size', default=64, type=int, help='patch size (default: 64)')
@@ -85,29 +91,55 @@ def main():
     classes_list = np.array(list(state['idx_to_class'].values()))
     file_print(args.logging_file, 'done\n')
 
-    # Data loading code
-    normalize = transforms.Normalize(mean=[0, 0, 0],
-                                     std=[1, 1, 1])
+    # Load config file
+    zits_config = Config(args.config_path)
+    zits_config.MODE = 1
 
-    instances_path = os.path.join(args.data, 'annotations/instances_val2014.json')
-    data_path = os.path.join(args.data, 'images/val2014')
-    val_dataset = CocoDetection(data_path,
-                                instances_path,
-                                transforms.Compose([
-                                    transforms.Resize((args.image_size, args.image_size)),
-                                    transforms.ToTensor(),
-                                    normalize,
-                                ]))
+    torch.backends.cudnn.benchmark = True  # cudnn auto-tuner
 
+    # Initialize random seed
+    import random
+    torch.manual_seed(zits_config.SEED)
+    torch.cuda.manual_seed_all(zits_config.SEED)
+    np.random.seed(zits_config.SEED)
+    random.seed(zits_config.SEED)
+
+    # Build the model and load the best model for eval - ADD AN ARG TO INIT FOR TRANSFORMS HERE, INSTANCES, DATA PATH
+    zits_model = ZITSforMSCOCO(zits_config, 0, 0, True)
+
+    # Create the MSCOCO dataset here using the new DynamicDatasetMSCOCO class, then send a batch into eval
+    dataset = zits_model.val_dataset   # Eventually need to incorporate the GPU dataset splitter as well!!!
 
     # Create GPU specific dataset
-    gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(val_dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
+    gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
     file_print(args.logging_file, "listing out info about this GPU process...")
     file_print(args.logging_file, f"length of gpu_val_dataset: {len(gpu_val_dataset)}\nbatch is currently at: {(int)(start_idx / args.batch_size)}\nstart_idx: {start_idx}\nend_idx: {end_idx}")
 
     val_loader = torch.utils.data.DataLoader(
-        gpu_val_dataset, batch_size=args.batch_size, shuffle=False,
-        num_workers=args.workers, pin_memory=True)
+        gpu_val_dataset, batch_size=zits_config.BATCH_SIZE, shuffle=False,
+        num_workers=2, pin_memory=True)
+
+    # normalize = transforms.Normalize(mean=[0, 0, 0],
+    #                                  std=[1, 1, 1])
+
+    # instances_path = os.path.join(args.data, 'annotations/instances_val2014.json')
+    # data_path = os.path.join(args.data, 'images/val2014')
+    # val_dataset = CocoDetection(data_path,
+    #                             instances_path,
+    #                             transforms.Compose([
+    #                                 transforms.Resize((args.image_size, args.image_size)),
+    #                                 transforms.ToTensor(),
+    #                                 normalize,
+    #                             ]))
+
+    # # Create GPU specific dataset
+    # gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(val_dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
+    # file_print(args.logging_file, "listing out info about this GPU process...")
+    # file_print(args.logging_file, f"length of gpu_val_dataset: {len(gpu_val_dataset)}\nbatch is currently at: {(int)(start_idx / args.batch_size)}\nstart_idx: {start_idx}\nend_idx: {end_idx}")
+
+    # val_loader = torch.utils.data.DataLoader(
+    #     gpu_val_dataset, batch_size=args.batch_size, shuffle=False,
+    #     num_workers=args.workers, pin_memory=True)
 
     # Create R-covering set of masks for both the first and second rounds
     im_size = [args.image_size, args.image_size]
@@ -123,9 +155,9 @@ def main():
         mask_list_sr = mask_list_fr
         mask_round_equal = True
 
-    validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args)
+    validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, zits_model, args)
 
-def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args):
+def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, zits_model, args):
     file_print(args.logging_file, "starting actual validation...")
 
     Sig = torch.nn.Sigmoid()
@@ -138,13 +170,15 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
     metrics = PerformanceMetrics(num_classes)
 
     # target shape: [batch_size, object_size_channels, number_classes]
-    for batch_index, (input, target) in enumerate(val_loader):
-        
+    # for batch_index, (input, target) in enumerate(val_loader):
+    for batch_index, batch in enumerate(val_loader):
+
         file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
+        im = batch['image']
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
+        target = batch['target']
         target = target.max(dim=1)[0]
-        im = input
         target = target.cpu().numpy()
 
         # Initialize all_preds to -1 in order to filter out unused mask combinations at the end
@@ -156,11 +190,16 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
             file_print(args.logging_file, f"Certification is {(i / num_masks_fr) * 100:0.2f}% complete!")
             for j, mask2 in enumerate(mask_list_sr[start:]):
                 mask2 = mask2.reshape(1, 1, *mask2.shape).to(args.rank)
-                masked_im = torch.where(torch.logical_and(mask1, mask2), im.to(args.rank), torch.tensor(0.0).to(args.rank))
+
+                mask_combined = torch.logical_and(mask1, mask2).int()
+                mask_invert = torch.logical_not(mask_combined).int()
+
+                # model eval - make sure that mask_invert is 2D before passing into eval_batch()
+                inpainted_im = zits_model.eval_batch(batch, mask_invert[0, 0, ...])
 
                 # compute output
                 with torch.no_grad():
-                    output = Sig(model(masked_im).to(args.rank)).cpu()
+                    output = Sig(model(inpainted_im).to(args.rank)).cpu()
 
                 pred = output.data.gt(args.thre).long()
                 all_preds[:, i * num_masks_sr + j] = pred.cpu().numpy()

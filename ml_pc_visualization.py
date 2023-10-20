@@ -35,7 +35,9 @@ parser.add_argument('--mask-number', default=6, type=int, help='mask number (def
 parser.add_argument('--image-index', default=0, type=int, help='index in the dataset to visualize (default: 0)')
 parser.add_argument('--first-mask-index', default=0, type=int, help='first mask index to cover image (default: 0)')
 parser.add_argument('--second-mask-index', default=0, type=int, help='second mask index to cover image (default: 0)')
-parser.add_argument("--clean-im",type=bool, default=False, help="perform inference on the clean imange (default: False)")
+parser.add_argument('--clean-im', action='store_true', help='perform inference on the clean image; to run on masked image, use --no-clean-im as the arg')
+parser.add_argument('--no-clean-im', dest='clean_im', action='store_false', help='perform inference on the masked image; to run on the clean image, use --clean-im as the arg')
+parser.set_defaults(clean_im=False)
 
 def main():
     args = parser.parse_args()
@@ -109,6 +111,12 @@ def visualize_image(model, val_dataset, classes_list, mask_list, args):
             detected_classes.append(classes_list[i])
 
     # Displaying image
+    mask_im = torch.logical_not(torch.logical_and(mask1, mask2)).cpu().numpy().transpose((1, 2, 0)).astype(float)
+    #plt.imsave("COCO_val2014_000000000143.png", im.cpu().numpy().transpose((1, 2, 0)))
+    
+    # Use this to save an image of the masks themselves
+    #plt.imsave("testmask.png", np.repeat(mask_im, 3, axis=2))
+
     print('showing image on screen...')
     fig = plt.figure()
     plt.imshow(masked_im.cpu().numpy().transpose((1, 2, 0)))
