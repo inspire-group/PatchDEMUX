@@ -3,9 +3,9 @@
 PatchCleanser/checkpoints
 PatchCleanser/data
 PatchCleanser/dump
-packages
 checkpoints
 dump
+packages
 
 # Compiled source #
 ###################

@@ -12,8 +12,8 @@ from utils.defense import gen_mask_set
 from utils.datasets import CocoDetection
 
 import sys
-sys.path.append("ASL/")
-from ASL.src.models import create_model
+sys.path.append("packages/ASL/")
+from packages.ASL.src.models import create_model
 
 parser = argparse.ArgumentParser(description='Multi-Label PatchCleanser Image Visualization')
 
@@ -118,6 +118,7 @@ def visualize_image(model, val_dataset, classes_list, mask_list, args):
     #plt.imsave("testmask.png", np.repeat(mask_im, 3, axis=2))
 
     print('showing image on screen...')
+    print(detected_classes)
     fig = plt.figure()
     plt.imshow(masked_im.cpu().numpy().transpose((1, 2, 0)))
     plt.axis('off')

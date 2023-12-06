@@ -8,7 +8,8 @@
 #SBATCH --ntasks-per-node=1      # number of tasks per-node (choose equal to gpus) [make sure ntasks and ngpus are equal]
 #SBATCH --gpus-per-node=1        # gpus per node
 #SBATCH --cpus-per-task=8        # cpu-cores per task (>1 if multi-threaded tasks)
-#SBATCH --time=1:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=13:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --array=0-3
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
@@ -27,14 +28,11 @@ BATCH_SIZE=64
 PATCH_SIZE=64
 MASK_NUMBER_FR=6
 MASK_NUMBER_SR=6
-THRE_ARR=(0.0 0.1 0.2)
+THRE_ARR=(0.2)
 
 # GPU info
-#WORLD_GPU_ID=$SLURM_ARRAY_TASK_ID
-#TOTAL_NUM_GPU=4
-
-WORLD_GPU_ID=0
-TOTAL_NUM_GPU=1
+WORLD_GPU_ID=$SLURM_ARRAY_TASK_ID
+TOTAL_NUM_GPU=4
 
 # Misc.
 TRIAL=1

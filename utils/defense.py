@@ -79,8 +79,6 @@ def single_masking(data, mask_list, num_classes, model, model_config):
     thre = model_config.thre
     Sig = torch.nn.Sigmoid()
 
-    print(f"threshold is: {thre}", flush=True)
-
     num_masks = len(mask_list)
     mask_all_preds = np.zeros([data.shape[0], num_masks, num_classes])
     for i, mask in enumerate(mask_list):
@@ -126,7 +124,6 @@ def double_masking(data, mask_list_fr, num_classes, model, model_config, debug=F
     consensus_bool = np.all(fr_all_preds == fr_all_preds[:, 0:1, :], axis=1)
     output_pred[consensus_bool] = fr_all_preds[:, 0, :][consensus_bool]
     if np.all(consensus_bool): 
-        print("in first return")
         return torch.tensor(output_pred)    # If every element has consensus, then skip cases II and III
 
     # Find the majority class associated with the masked predictions
