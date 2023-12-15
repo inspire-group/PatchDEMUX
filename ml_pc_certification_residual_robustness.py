@@ -39,6 +39,7 @@ parser.add_argument('-b', '--batch-size', default=32, type=int, help='mini-batch
 parser.add_argument('--model-name', default='tresnet_l')
 parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
+parser.add_argument('--attacker-type', choices=["worst_case", "FN_attacker", "FP_attacker"], default="worst_case")
 
 # Mask set specifics
 parser.add_argument('--patch-size', default=64, type=int, help='patch size (default: 64)')
@@ -125,8 +126,6 @@ def main():
 
     validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args)
 
-# DO CHECKING ON INDIVIDUAL IMAGE ROBUSTNESS WITH IMAGE 3 (IE, THE DOG AND BICYCLE PICTURE; need to verify that the histogram aligns with the actual double masks listed in the analysis file
-# THEN IMPLEMENT A BATCH VERSION OF THIS
 def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args):
     file_print(args.logging_file, "starting actual validation...")
 
@@ -138,6 +137,15 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
     num_classes = len(classes_list)
 
     metrics = PerformanceMetrics(num_classes)
+    tight_metrics = PerformanceMetrics(1)
+
+# DO CHECKING ON INDIVIDUAL IMAGE ROBUSTNESS WITH IMAGE 3 (IE, THE DOG AND BICYCLE PICTURE; need to verify that the histogram aligns with the actual double masks listed in the analysis file
+# THEN IMPLEMENT A BATCH VERSION OF THIS
+# Batch version strategy: make metric class_idx be a boolean but of length 80 (i.e., every class) x BATCH_SIZE where a True element signifies that the class 
+# is relevent to the metric for the given image in the batch. Mask_histogram should be BATCH_SIZE in depth. 
+# Then, discordant_preds_bool should just be all_preds for a given mask == discordant_pred. During the line 160 loop
+# loop over EVERY one of the 80 classes, get the subset of images where each class failed, and then slice mask_histogram according to this subset of images from the batch
+# alternative: just loop this manually over every image in the batch in the validate func below
 
     # Compute a mask histogram in order to derive tighter bounds during certification
     def mask_histogram_generator(all_preds, metrics, metric_type, num_masks):
@@ -175,9 +183,6 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
         im = input
         target = target.cpu().numpy()
 
-        if (batch_index == 0 or batch_index == 1):
-            continue
-
         # Initialize all_preds to -1 in order to filter out unused mask combinations at the end
         all_preds = np.zeros([im.shape[0], num_masks_fr * num_masks_sr, num_classes]) - 1
         for i, mask1 in enumerate(mask_list_fr):
@@ -198,8 +203,6 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
         # Find which classes had consensus in masked predictions
         all_preds_ones = np.all(all_preds, axis=1)
         all_preds_zeros = np.all(np.logical_not(all_preds), axis=1)
-
-        breakpoint()
         
         # Compute certified TP, TN, FN, FP
         confirmed_tp = np.logical_and(all_preds_ones, target).astype(int)
@@ -212,28 +215,191 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
         precision_o, recall_o = metrics.overallPrecision(), metrics.overallRecall()
         precision_c, recall_c = metrics.averageClassPrecision(), metrics.averageClassRecall()
 
-        # Compute tighter bounds on the worst case FN and worst case FP
-        total_fn_classes = np.sum(worst_case_fn)
-        total_fp_classes = np.sum(worst_case_fp)
-        fn_bound = fp_bound = 0
-
-        if total_fn_classes:
-            fn_histogram = mask_histogram_generator(all_preds, worst_case_fn, "FN", num_masks_fr)
-            fn_bound = np.max(np.sum(fn_histogram, axis=2, keepdims=True))
-
-        if total_fp_classes:
-            fp_histogram = mask_histogram_generator(all_preds, worst_case_fp, "FP", num_masks_fr)
-            fp_bound = np.max(np.sum(fp_histogram, axis=2, keepdims=True))
-
         file_print(args.logging_file, f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f}\n')
+
+        # Compute tighter bounds on the worst case FN and worst case FP
+        fn_bound_batch = np.zeros((im.shape[0], 1))
+        fp_bound_batch = np.zeros((im.shape[0], 1))
+        for im_idx in range(im.shape[0]):
+            total_fn_classes = np.sum(worst_case_fn[im_idx, :])
+            total_fp_classes = np.sum(worst_case_fp[im_idx, :])
+            fn_bound = total_fn_classes
+            fp_bound = total_fp_classes
+
+            ##### TEST THIS WITH THE FIRST BATCH OF 64 IN ORDER TO CONFIRM THAT THE LOGIC IS STILL CONSISTENT, THEN TRY THE OTHER TWO ATTACKERS
+
+            if fn_bound:
+                fn_histogram = mask_histogram_generator(all_preds[None, im_idx, :, :], worst_case_fn[None, im_idx, :], "FN", num_masks_fr)
+                fn_histogram_sum = np.sum(fn_histogram, axis=2, keepdims=True)
+                fn_bound = np.max(fn_histogram_sum)
+                fn_bound_idx = np.where(fn_histogram_sum == fn_bound)[1]
+
+            if fp_bound:
+                fp_histogram = mask_histogram_generator(all_preds[None, im_idx, :, :], worst_case_fp[None, im_idx, :], "FP", num_masks_fr)
+                fp_histogram_sum = np.sum(fp_histogram, axis=2, keepdims=True)
+                fp_bound = np.max(fp_histogram_sum)
+                fp_bound_idx = np.where(fp_histogram_sum == fp_bound)[1]
+
+            # If the attacker prefers one metric over the other (i.e., for instance FN) then the other metric should be bounded
+            # by the subset of masks which are optimal for the preferred metric
+            if (args.attacker_type == "FN_attacker" and fn_bound and fp_bound): 
+                fp_bound = np.max(fp_histogram_sum[:, fn_bound_idx, :])
+            if (args.attacker_type == "FP_attacker" and fn_bound and fp_bound):
+                fn_bound = np.max(fn_histogram_sum[:, fp_bound_idx, :])
+
+            fn_bound_batch[im_idx, :] = fn_bound
+            fp_bound_batch[im_idx, :] = fp_bound
+
+        # Using tighter bounds leads to an inability to determine performance at the class level
+        fn_difference = np.sum(worst_case_fn, axis=1)[:, None] - fn_bound_batch
+        fp_difference = np.sum(worst_case_fp, axis=1)[:, None] - fp_bound_batch
+
+        tight_metrics.updateMetrics(TP=np.sum(confirmed_tp, axis=1)[:, None] + fn_difference, TN=np.sum(confirmed_tn, axis=1)[:, None] + fp_difference, FN=fn_bound_batch, FP=fp_bound_batch)
+        precision_tight_o, recall_tight_o = tight_metrics.overallPrecision(), tight_metrics.overallRecall()
+
+        file_print(args.logging_file, f'P_TO {precision_tight_o:.2f} R_TO {recall_tight_o:.2f}\n')
 
     # Save the certified TP, TN, FN, FP
     np.savez(args.save_dir + f"certified_metrics", TP=metrics.TP, TN=metrics.TN, FN=metrics.FN, FP=metrics.FP)
+    np.savez(args.save_dir + f"certified_metrics_tight", TP=tight_metrics.TP, TN=tight_metrics.TN, FN=tight_metrics.FN, FP=tight_metrics.FP)
 
     # Save the precision and recall metrics
     with open(args.save_dir + f"performance_metrics.txt", "w") as f:
         f.write(f"P_O: {precision_o:.2f} \t R_O: {recall_o:.2f}\n")
-        f.write(f"P_C: {precision_c:.2f} \t R_C: {recall_c:.2f}")
+        f.write(f"P_C: {precision_c:.2f} \t R_C: {recall_c:.2f}\n\n")
+        f.write(f"P_TO: {precision_tight_o:.2f} \t R_TO: {recall_tight_o:.2f}")
+
+# Worst case
+# array([[2.],
+#        [1.],
+#        [0.],
+#        [2.],
+#        [0.],
+#        [2.],
+#        [0.],
+#        [5.],
+#        [1.],
+#        [2.],
+#        [1.],
+#        [0.],
+#        [4.],
+#        [1.],
+#        [0.],
+#        [4.],
+#        [1.],
+#        [3.],
+#        [1.],
+#        [0.],
+#        [0.],
+#        [0.],
+#        [2.],
+#        [1.],
+#        [0.],
+#        [0.],
+#        [1.],
+#        [0.],
+#        [1.],
+#        [1.],
+#        [4.],
+#        [0.],
+#        [0.],
+#        [1.],
+#        [2.],
+#        [0.],
+#        [1.],
+#        [4.],
+#        [0.],
+#        [2.],
+#        [1.],
+#        [0.],
+#        [0.],
+#        [5.],
+#        [0.],
+#        [0.],
+#        [2.],
+#        [2.],
+#        [4.],
+#        [2.],
+#        [1.],
+#        [3.],
+#        [1.],
+#        [0.],
+#        [3.],
+#        [0.],
+#        [0.],
+#        [0.],
+#        [0.],
+#        [1.],
+#        [0.],
+#        [1.],
+#        [1.],
+#        [2.]])
+
+#FP
+# array([[2.],
+#        [1.],
+#        [0.],
+#        [2.],
+#        [0.],
+#        [2.],
+#        [0.],
+#        [5.],
+#        [1.],
+#        [2.],
+#        [1.],
+#        [0.],
+#        [4.],
+#        [1.],
+#        [0.],
+#        [4.],
+#        [1.],
+#        [3.],
+#        [1.],
+#        [0.],
+#        [0.],
+#        [0.],
+#        [2.],
+#        [1.],
+#        [0.],
+#        [0.],
+#        [1.],
+#        [0.],
+#        [1.],
+#        [1.],
+#        [4.],
+#        [0.],
+#        [0.],
+#        [1.],
+#        [2.],
+#        [0.],
+#        [1.],
+#        [4.],
+#        [0.],
+#        [2.],
+#        [1.],
+#        [0.],
+#        [0.],
+#        [5.],
+#        [0.],
+#        [0.],
+#        [2.],
+#        [2.],
+#        [4.],
+#        [2.],
+#        [1.],
+#        [3.],
+#        [1.],
+#        [0.],
+#        [3.],
+#        [0.],
+#        [0.],
+#        [0.],
+#        [0.],
+#        [1.],
+#        [0.],
+#        [1.],
+#        [1.],
+#        [2.]])
 
     return
 
