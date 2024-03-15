@@ -70,6 +70,8 @@ def main():
 
     title_header = f"{args.metric_plot} plot"
 
+    breakpoint()
+
     # Create metrics plot
     save_metrics_plot(overall_first_metric_array, overall_second_metric_array, first_metric, second_metric, f"{title_header} plot for overall classification", str(path / f"{args.metric_plot}_plot.png"))
 
