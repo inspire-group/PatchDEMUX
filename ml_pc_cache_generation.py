@@ -20,19 +20,18 @@ from pathlib import Path
 from datetime import date
 todaystring = date.today().strftime("%m-%d-%Y")
 
+from utils.defense import gen_mask_set
 from utils.metrics import PerformanceMetrics
 from utils.datasets import CocoDetection, split_dataset_gpu
-from utils.defense import gen_mask_set, double_masking, ModelConfig
 
 import sys
 sys.path.append("packages/ASL/")
 from packages.ASL.src.models import create_model
-from packages.ASL.src.loss_functions.losses import AsymmetricLoss
 
 sys.path.append("packages/query2labels/lib")
 from packages.query2labels.lib.models.query2label import build_q2l
 
-parser = argparse.ArgumentParser(description='Multi-Label ASL Model Validation')
+parser = argparse.ArgumentParser(description='Multi-Label PatchCleanser Certification')
 
 # Dataset specifics
 parser.add_argument('data', metavar='DIR', help='path to dataset')
@@ -41,15 +40,14 @@ parser.add_argument('--num-classes', default=80)
 parser.add_argument('--image-size', default=448, type=int, help='input image size (default: 448)')
 parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
                     help='number of data loading workers (default: 2)')
-parser.add_argument('-b', '--batch-size', default=64
-, type=int, help='mini-batch size (default: 64)')
+parser.add_argument('-b', '--batch-size', default=32, type=int, help='mini-batch size (default: 32)')
 
 # Model specifics
 available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
 parser.add_argument('--model-name', choices=available_models, default='tresnet_l')
 parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
-parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
+parser.add_argument('--attacker-type', choices=["worst_case", "FN_attacker", "FP_attacker"], default="worst_case")
 
 # * Transformer
 parser.add_argument('--config', type=str, help='config file')
@@ -78,9 +76,6 @@ parser.add_argument('--keep_input_proj', action='store_true',
                     help="keep the input projection layer. Needed when the channel of image features is different from hidden_dim of Transformer layers.")
 
 # Mask set specifics
-parser.add_argument('--patchcleanser', action='store_true', help='enable PatchCleanser algorithm for inference; to disable, run --no-patchcleanser as the arg')
-parser.add_argument('--no-patchcleanser', dest='patchcleanser', action='store_false', help='disable PatchCleanser algorithm for inference; to enable, run --patchcleanser as the arg')
-parser.set_defaults(patchcleanser=True)
 parser.add_argument('--patch-size', default=64, type=int, help='patch size (default: 64)')
 parser.add_argument('--mask-number-fr', default=6, type=int, help='mask number first round (default: 6)')
 parser.add_argument('--mask-number-sr', default=6, type=int, help='mask number second round (default: 6)')
@@ -91,7 +86,8 @@ parser.add_argument('--total-num-gpu', default=1, type=int, help='total number o
 
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
-parser.add_argument('--trial-type', default="baseline", type=str, help='type of checkpoints used with the trial (default: baseline/unmodified)')
+parser.add_argument('--trial-type', default="vanilla", type=str, help='type of checkpoints used with the trial (default: vanilla/unmodified)')
+parser.add_argument('--print-freq', '-p', default=64, type=int, help='print frequency (default: 64)')
 
 def file_print(file_path, msg):
     with open(file_path, "a") as f:
@@ -108,13 +104,7 @@ def clean_state_dict(state_dict):
 
 # Load in the multi-label classifier
 def load_model(args, is_ViT):
-
-    # Setup model
-    # file_print(args.logging_file, 'creating and loading the model...')
-    # state = torch.load(args.model_path, map_location='cpu')
-    # args.num_classes = state['num_classes']
     args.do_bottleneck_head = False
-    # args.rank = 0
 
     # Create model
     model = build_q2l(args).cuda() if is_ViT else create_model(args).cuda()
@@ -145,6 +135,7 @@ def load_model(args, is_ViT):
 
 def main():
     args = parser.parse_args()
+    args.batch_size = args.batch_size   
 
     is_ViT = False
     if args.model_name == "Q2L-CvT_w24-384":
@@ -164,13 +155,12 @@ def main():
     world_gpu_id = args.world_gpu_id
 
     # Construct file path for saving metrics
-    val_status = f"defended/{args.dataset_name}/patch_{args.patch_size}_masknumfr_{args.mask_number_fr}_masknumsr_{args.mask_number_sr}" if args.patchcleanser else f"undefended/{args.dataset_name}"
-    foldername = f"dump/{val_status}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}_thre_{(int)(args.thre * 100)}percent/gpu_world_id_{args.world_gpu_id}/"
+    foldername = f"/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/{args.dataset_name}/patch_{args.patch_size}_masknumfr_{args.mask_number_fr}_masknumsr_{args.mask_number_sr}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}/gpu_world_id_{args.world_gpu_id}/"
     Path(foldername).mkdir(parents=True, exist_ok=True)
     args.save_dir = foldername
-    args.logging_file = foldername + "logging_val.txt"
-
-    # build model
+    args.logging_file = foldername + "logging.txt"
+    
+    # Setup model
     model, args, classes_list = load_model(args, is_ViT)
 
     # Data loading code
@@ -187,6 +177,7 @@ def main():
                                     normalize,
                                 ]))
 
+
     # Create GPU specific dataset
     gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(val_dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
     file_print(args.logging_file, "listing out info about this GPU process...")
@@ -197,80 +188,69 @@ def main():
         num_workers=args.workers, pin_memory=True)
 
     # Create R-covering set of masks for both the first and second rounds
+    breakpoint()
     im_size = [args.image_size, args.image_size]
     patch_size = [args.patch_size, args.patch_size]
     mask_number_fr = [args.mask_number_fr, args.mask_number_fr]
-    mask_list_fr, mask_size_fr, mask_stride_fr = gen_mask_set(im_size, patch_size, mask_number_fr) if args.patchcleanser else (None, None, None)
+    mask_list_fr, mask_size_fr, mask_stride_fr = gen_mask_set(im_size, patch_size, mask_number_fr)
 
-    validate_multi(model, val_loader, classes_list, args, mask_list_fr)
+    mask_round_equal = False
+    if(args.mask_number_fr != args.mask_number_sr):
+        mask_number_sr = [args.mask_number_sr, args.mask_number_sr]
+        mask_list_sr, mask_size_sr, mask_stride_sr = gen_mask_set(im_size, patch_size, mask_number_sr)
+    else:
+        mask_list_sr = mask_list_fr
+        mask_round_equal = True
 
-def predict(model, im, target, criterion, model_config):
-    rank = model_config.rank
-    thre = model_config.thre
+    validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args)
+
+def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args):
+    file_print(args.logging_file, "starting output generation...")
+
     Sig = torch.nn.Sigmoid()
-
-    # Compute output
-    with torch.no_grad():
-        output = model(im)
-        output_regular = Sig(output).cpu()
-
-    # Compute loss and predictions
-    loss = criterion(output.to(rank), target.to(rank))
-    pred = output_regular.detach().gt(thre).long()
-
-    return pred, loss.item()
-
-def validate_multi(model, val_loader, classes_list, args, mask_list_fr = None):
-    file_print(args.logging_file, "starting actual validation...")
 
     preds = []
     targets = []
+    num_masks_fr, num_masks_sr = len(mask_list_fr), len(mask_list_sr)
     num_classes = len(classes_list)
-
-    metrics = PerformanceMetrics(num_classes)
-    model_config = ModelConfig(num_classes, args.rank, args.thre)
-    criterion = AsymmetricLoss(gamma_neg=4, gamma_pos=0, clip=0.05, disable_torch_grad_focal_loss=True)
-    total_loss = 0.0
 
     # target shape: [batch_size, object_size_channels, number_classes]
     for batch_index, (input, target) in enumerate(val_loader):
+        
+        file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
+        output_dict = {}
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
-        im = input.to(args.rank)
+        im = input
+        target = target.cpu().numpy()
+        output_dict["target"] = target
 
-        # Compute output
-        pred, loss = (double_masking(im, mask_list_fr, num_classes, model, model_config), np.nan) if mask_list_fr else predict(model, im, target, criterion, model_config)
+        # compute clean output with no masks
+        with torch.no_grad():
+            clean_output = Sig(model(im.to(args.rank)).to(args.rank)).cpu().numpy()
+        output_dict["clean_output"] = clean_output
 
-        # The ASL loss in each batch is NOT the average of losses from each image - rather, it is the sum
-        total_loss += loss
-        
-        # Compute TP, TN, FN, FP
-        tp = (pred + target).eq(2).cpu().numpy().astype(int)
-        tn = (pred + target).eq(0).cpu().numpy().astype(int)
-        fn = (pred - target).eq(-1).cpu().numpy().astype(int)
-        fp = (pred - target).eq(1).cpu().numpy().astype(int)
+        # Allow double counting of mask pairs to facilitate histogram analysis later 
+        all_preds = np.zeros([im.shape[0], num_masks_fr * num_masks_sr, num_classes]) - 1
+        for i, mask1 in enumerate(mask_list_fr):
+            mask1 = mask1.reshape(1, 1, *mask1.shape).to(args.rank)            
 
-        # Compute precision and recall
-        metrics.updateMetrics(TP=tp, TN=tn, FN=fn, FP=fp)
-        precision_o, recall_o = metrics.overallPrecision(), metrics.overallRecall()
-        precision_c, recall_c = metrics.averageClassPrecision(), metrics.averageClassRecall()
+            file_print(args.logging_file, f"Certification is {(i / num_masks_fr) * 100:0.2f}% complete!")
+            for j, mask2 in enumerate(mask_list_sr):
+                mask2 = mask2.reshape(1, 1, *mask2.shape).to(args.rank)
+                masked_im = torch.where(torch.logical_and(mask1, mask2), im.to(args.rank), torch.tensor(0.0).to(args.rank))
 
-        if (batch_index % 100 == 0):
-            file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
-            file_print(args.logging_file, f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f} loss {f"{loss:.2f}" if not np.isnan(loss) else "Not Applicable"}\n')
+                # compute output
+                with torch.no_grad():
+                    output = Sig(model(masked_im).to(args.rank)).cpu()
 
-    # Compute average loss per image sample
-    average_loss = total_loss / len(val_loader.dataset)
+                all_preds[:, i * num_masks_sr + j] = output.cpu().numpy()
 
-    # Save the certified TP, TN, FN, FP
-    np.savez(args.save_dir + f"certified_metrics", TP=metrics.TP, TN=metrics.TN, FN=metrics.FN, FP=metrics.FP)
+        output_dict["masked_output"] = all_preds
 
-    # Save the precision and recall metrics
-    with open(args.save_dir + f"performance_metrics.txt", "w") as f:
-        f.write(f"P_O: {precision_o:.2f} \t R_O: {recall_o:.2f}\n")
-        f.write(f"P_C: {precision_c:.2f} \t R_C: {recall_c:.2f}\n")
-        f.write(f'average loss: {f"{average_loss:.4f}" if not np.isnan(average_loss) else "Not Applicable"}')
+        # Save outputs for this batch as numpy arrays
+        np.savez(args.save_dir + f"gpu_{args.world_gpu_id}_batch_{batch_index}_outputs", **output_dict)
 
     return
 

@@ -43,7 +43,7 @@ def gen_mask_set(im_size, patch_size, mask_number):
     mask_number     computation budget along both axes, (width, height)
 
     OUTPUT:
-    mask_list       list of torch.tensor, the generated R-covering mask set, the binary masks are moved to CUDA
+    mask_list       list of torch.tensor, the generated R-covering mask set
     mask_size       the mask size along both axes, (width, height)
     mask_stride     the mask stride along both axes, (width, height)
     '''
@@ -57,7 +57,7 @@ def gen_mask_set(im_size, patch_size, mask_number):
     height_masks, mask_size[1], mask_stride[1] = gen_1D_mask_set(im_size[1], patch_size[1], mask_number[1])
 
     # Combine 1D masks with matrix OR operation to create 2D image masks
-    mask_list = [torch.from_numpy(w_mask | h_mask.T).cuda() for w_mask in width_masks for h_mask in height_masks]
+    mask_list = [torch.from_numpy(w_mask | h_mask.T) for w_mask in width_masks for h_mask in height_masks]
 
     return mask_list, mask_size, mask_stride
 
@@ -171,6 +171,102 @@ def double_masking(data, mask_list_fr, num_classes, model, model_config, debug=F
     output_pred[output_pred == -1] = majority_pred[output_pred == -1]
 
     return torch.tensor(output_pred)
+
+def single_masking_cache(cached_outputs, fixed_mask_idx, mask_list, num_classes, model_config):
+    # run inference on a set of data which is augmented by masks from mask_list
+    '''
+    INPUT:
+    cached_outputs  numpy.ndarray [B,len(mask_list) ** 2,len(num_classes)], a batch of cached outputs
+    fixed_mask_idx  int, index for a primary mask which is present in addition to the mask_list (-1 implies absence)
+    mask_list       a list of torch.Tensor, R-covering mask set
+    num_classes     number of classes in the dataset
+    model_config    ModelConfig dataclass, contains configuration for model
+
+    OUTPUT:
+    mask_all_preds  numpy.ndarray, the prediction labels across all masks from mask_list
+    '''
+    num_classes = model_config.num_classes
+    rank = model_config.rank
+    thre = model_config.thre
+
+    num_masks = len(mask_list)
+    primary_mask_absence = (fixed_mask_idx < 0)
+    mask_all_preds = np.zeros([cached_outputs.shape[0], num_masks, num_classes])
+    for i, mask in enumerate(mask_list):
+        if primary_mask_absence: fixed_mask_idx = i
+
+        # For cached_outputs, set of single mask predictions corresponding to mask i are at index (i * num_masks + i)
+        mask_all_preds[:, i] = cached_outputs[:, (i * num_masks + fixed_mask_idx)]
+
+    return mask_all_preds
+
+def double_masking_cache(cached_outputs, mask_list_fr, num_classes, model_config):
+    # perform double masking inference with the cached masked outputs and the mask set
+    '''
+    INPUT:
+    cached_outputs  numpy.ndarray [B,len(mask_list) ** 2,len(num_classes)], a batch of cached outputs
+    mask_list       a list of torch.Tensor, R-covering mask set
+    num_classes     number of classes in the dataset
+    model_config    ModelConfig dataclass, contains configuration for model
+
+    OUTPUT:
+    output_pred     numpy.ndarray, the prediction labels
+    '''
+
+    # Initialize output_pred to -1 in order to facilitate filtering at the end
+    num_classes = model_config.num_classes
+    rank = model_config.rank
+    output_pred = np.zeros((cached_outputs.shape[0], num_classes)) - 1
+
+    # First-round masking
+    fr_all_preds = single_masking_cache(cached_outputs, -1, mask_list_fr, num_classes, model_config)
+
+    # Find which classes had consensus in first round masked predictions (relevant for case I)
+    consensus_bool = np.all(fr_all_preds == np.expand_dims(fr_all_preds[:, 0, :], 1), axis=1)
+    output_pred[consensus_bool] = fr_all_preds[:, 0, :][consensus_bool]
+    if np.all(consensus_bool): 
+        return torch.tensor(output_pred)    # If every element has consensus, then skip cases II and III
+
+    # Find the majority class associated with the masked predictions
+    def axis_unique(arr):
+        values, counts = np.unique(arr, return_counts=True)
+        return values[np.argmax(counts)]
+    majority_pred = np.apply_along_axis(axis_unique, 1, fr_all_preds)
+
+    # numpy.nonzero returns a list of indices for each axis corresponding to elements with nonzero values - in this context the three 
+    # axes are [batch_index, mask_id, class_id], so minority_pred.shape = (num_nonzero_entries, 3)
+    minority_pred = np.transpose((fr_all_preds != np.expand_dims(majority_pred, 1)).nonzero())
+
+    # Apply second round masking to all minority predictions
+    filtered_masks_idx = np.unique(minority_pred[:, 1])
+    for idx in filtered_masks_idx:
+
+        # Ensure that the minority_pred array is not empty before slicing
+        if not minority_pred.size: break
+        minority_masks = minority_pred[minority_pred[:, 1] == idx]
+
+        # Ensure that the minority_pred values associated with the first round mask at idx are not empty before slicing
+        if not minority_masks.size: continue
+        minority_image_idx = np.unique(minority_masks[:, 0])
+        minority_images_cache = cached_outputs[minority_image_idx]
+    
+        # Apply the appropriate first round mask then perform second round masking
+        sr_all_preds = single_masking_cache(minority_images_cache, idx, mask_list_fr, num_classes, model_config)
+
+        # Find which classes had consensus in second round masked predictions (relevant for case II)
+        sr_consensus_bool = np.all(sr_all_preds == np.expand_dims(sr_all_preds[:, 0, :], 1), axis=1)
+        for masked_im in minority_masks:
+            masked_im_idx = np.where(minority_image_idx == masked_im[0])[0][0]    # Get reverse map of image index to minority_pred image index; leverage the fact that minority_image_idx removes duplicate batch image indices
+            masked_im_class = masked_im[2]
+            if sr_consensus_bool[masked_im_idx, masked_im_class]:
+                output_pred[masked_im[0], masked_im_class] = sr_all_preds[masked_im_idx, 0, masked_im_class]
+                minority_pred = minority_pred[np.logical_or(minority_pred[:, 0] != masked_im[0], minority_pred[:, 2] != masked_im_class)]    # Unwiring procedure to avoid unecessary second round masking
+    
+    # Set remaining outputs to be the first round majority value (relevant for case III)
+    output_pred[output_pred == -1] = majority_pred[output_pred == -1]
+
+    return torch.tensor(output_pred)
+
 ############################################ TEST CASE STARTING #######################################################
 # test case (test represents fr_all_preds):
 # test = np.ones((5, 10, 80))
