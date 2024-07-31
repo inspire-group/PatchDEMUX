@@ -89,7 +89,7 @@ def certify_cache(mask_list_fr, mask_list_sr, mask_round_equal, args):
     metrics = PerformanceMetrics(num_classes)
     tight_metrics = PerformanceMetrics(1)
 
-    # Compute a mask histogram in order to derive tighter bounds during certification
+    # Compute a mask histogram in order to derive tighter bounds during certification -> put this into defense.py and remove "generator" from the name...
     def mask_histogram_generator(all_preds, metrics, metric_type, num_masks):
         discordant_pred = 0 if metric_type == "FN" else 1
 
@@ -144,7 +144,8 @@ def certify_cache(mask_list_fr, mask_list_sr, mask_round_equal, args):
 
         file_print(args.logging_file, f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f}\n')
 
-        # Compute tighter bounds on the worst case FN and worst case FP
+        # Compute tighter bounds on the worst case FN and worst case FP -> something that can help with readability is setting some
+        # of these array indices to an actual variable name
         fn_bound_batch = np.zeros((all_preds.shape[0], 1))
         fp_bound_batch = np.zeros((all_preds.shape[0], 1))
         for im_idx in range(all_preds.shape[0]):

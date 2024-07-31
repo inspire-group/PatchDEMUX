@@ -50,6 +50,8 @@ parser.add_argument('--pretrained', dest='pretrained', action='store_true', help
 parser.add_argument('--attacker-type', choices=["worst_case", "FN_attacker", "FP_attacker"], default="worst_case")
 
 # * Transformer
+# note that if we have a config file, it might not be eeded to have all these parser args as well...
+# looking at the config file, looks like the args there are the exact same...delete these prolly
 parser.add_argument('--config', type=str, help='config file')
 parser.add_argument('--enc_layers', default=1, type=int, 
                     help="Number of encoding layers in the transformer")
@@ -107,7 +109,7 @@ def load_model(args, is_ViT):
     args.do_bottleneck_head = False
 
     # Create model
-    model = build_q2l(args).cuda() if is_ViT else create_model(args).cuda()
+    model = build_q2l(args) if is_ViT else create_model(args)
 
     # Setup depends on whether architecture is based on transformer or ResNet
     file_print(args.logging_file, f"setting up the model...{'ViT' if is_ViT else 'resnet'}")
@@ -124,6 +126,7 @@ def load_model(args, is_ViT):
     model.load_state_dict(state_dict, strict=True)
     args.rank = 0
     model = model.eval()
+    model.to(args.rank) #place this line in the non-cache script as well...replace the cuda() calls in creat_model() for concsistency in API usage thoroughout rest of the script
 
     # Cleanup intermediate variables
     del state
@@ -188,7 +191,6 @@ def main():
         num_workers=args.workers, pin_memory=True)
 
     # Create R-covering set of masks for both the first and second rounds
-    breakpoint()
     im_size = [args.image_size, args.image_size]
     patch_size = [args.patch_size, args.patch_size]
     mask_number_fr = [args.mask_number_fr, args.mask_number_fr]
@@ -216,7 +218,6 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
 
     # target shape: [batch_size, object_size_channels, number_classes]
     for batch_index, (input, target) in enumerate(val_loader):
-        
         file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
         output_dict = {}
 
@@ -251,6 +252,17 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
 
         # Save outputs for this batch as numpy arrays
         np.savez(args.save_dir + f"gpu_{args.world_gpu_id}_batch_{batch_index}_outputs", **output_dict)
+
+        # could have something here where a file is shared among all processes to track progress...
+        # use a lock for this file -> https://www.geeksforgeeks.org/file-locking-in-python/
+        # After obtaining the lock, check if a running total is equal to num of GPUs. If so, then create a bash script for cleaning up
+
+        # Writing bash script: https://stackoverflow.com/questions/49516592/easily-creating-a-bash-script-in-python
+        # for i in {1..10}
+        # do
+        #   mv gpu_world_id_$i/*.npz .
+        # done
+        # then remove all the created folders....
 
     return
 
