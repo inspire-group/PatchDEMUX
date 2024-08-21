@@ -64,7 +64,7 @@ def main():
                                 transforms.Compose([
                                     transforms.Resize((args.image_size, args.image_size)),
                                     transforms.ToTensor(),
-                                    normalize,
+                                    # normalize, # no need, toTensor does normalization
                                 ]))
 
     print("len(val_dataset)): ", len(val_dataset))
@@ -85,7 +85,7 @@ def visualize_image(model, val_dataset, classes_list, mask_list, args):
 
     # target shape: [batch_size, object_size_channels, number_classes]
     im, target = val_dataset[args.image_index]
-
+    
     # torch.max returns (values, indices), additionally squeezes along the dimension dim
     target = target.max(dim=0)[0]
  

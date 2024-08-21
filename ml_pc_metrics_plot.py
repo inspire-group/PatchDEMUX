@@ -1,3 +1,6 @@
+# TODO:
+# - CHECK, BUT GIVEN USE OF EXCEL FOR PLOTTING THIS SCRIPT MIGHT NOT BE NEEDED AND CAN BE DELETED
+
 import numpy as np 
 import matplotlib.pyplot as plt
 import torch 

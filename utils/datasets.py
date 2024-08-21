@@ -41,6 +41,7 @@ class CocoDetection(datasets.coco.CocoDetection):
         self.coco = COCO(annFile)
 
         # Obtain MSCOCO ids in the order which they appear in the directory
+        # NOTE: images with no objects are ignored. To incorporate these, use coco.getImgIds(catIds=[]) instead of coco.imgToAnns.keys()
         self.ids = sorted(list(self.coco.imgToAnns.keys()))
         self.transform = transform
         self.target_transform = target_transform
@@ -73,8 +74,31 @@ class CocoDetection(datasets.coco.CocoDetection):
         path = coco.loadImgs(img_id)[0]['file_name']
         img = Image.open(os.path.join(self.root, path)).convert('RGB')
         if self.transform is not None:
-            img = self.transform(img)
+            img, _ = self.transform((img, path))
 
         if self.target_transform is not None:
             target = self.target_transform(target)
-        return img, target
+        
+        return img, target, path
+    
+# Adopted from: https://stackoverflow.com/questions/75722946/pytorch-custom-transformation-with-additional-argument-in-call
+class TransformWrapper:
+    """ A wrapper for transforms that operate on image data; allows for interoperability
+        of transforms which apply solely to image data and those which apply  
+        to (image_data, filename) tuples within the transforms.Compose API
+    
+    Args:
+        transform (torchvision.transforms): transform to be wrapped
+    """
+    def __init__(self, transform):
+        self.transform = transform
+
+    def __call__(self, data):
+        """
+        Args:
+            data: tuple containing both an image and its file name
+        Returns:
+            transformed image data
+        """
+        im, file_name = data
+        return self.transform(im), file_name

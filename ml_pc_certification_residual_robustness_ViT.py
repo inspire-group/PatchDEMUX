@@ -105,6 +105,7 @@ def clean_state_dict(state_dict):
 
 # Load in the multi-label classifier
 def load_model(args, is_ViT):
+    args.do_bottleneck_head = False
 
     # Create model
     model = build_q2l(args).cuda() if is_ViT else create_model(args).cuda()
@@ -174,7 +175,7 @@ def main():
                                 transforms.Compose([
                                     transforms.Resize((args.image_size, args.image_size)),
                                     transforms.ToTensor(),
-                                    normalize,
+                                    # normalize, # no need, toTensor does normalization
                                 ]))
 
 
@@ -251,13 +252,13 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
         return mask_histogram
 
     # target shape: [batch_size, object_size_channels, number_classes]
-    for batch_index, (input, target) in enumerate(val_loader):
+    for batch_index, (input_data, target) in enumerate(val_loader):
         
         file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
-        im = input
+        im = input_data
         target = target.cpu().numpy()
 
         # Allow double counting of mask pairs to facilitate histogram analysis later 

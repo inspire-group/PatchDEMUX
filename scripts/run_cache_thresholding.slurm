@@ -7,7 +7,7 @@
 #SBATCH --nodes=1                # node count (number of different machine)
 #SBATCH --ntasks-per-node=1      # number of tasks per-node (choose equal to gpus) [make sure ntasks and ngpus are equal]
 #SBATCH --cpus-per-task=1        # cpu-cores per task (>1 if multi-threaded tasks)
-#SBATCH --time=6:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=8:00:00          # total run time limit (HH:MM:SS)
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
@@ -20,21 +20,21 @@ source activate torch-env
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
 
-#THRE_ARR=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99)
-THRE_ARR=(0.00005 0.0001 0.0005 0.001 0.005 0.01 0.05)
+THRE_ARR=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99)
+#THRE_ARR=(0.00005 0.0001 0.0005 0.001 0.005 0.01 0.05)
 
 # Model security parameters
-IMAGE_SIZE=384
+IMAGE_SIZE=448
 ATTACKER_TYPE="worst_case"
-PATCH_SIZE=55
+PATCH_SIZE=64
 MASK_NUMBER=6
 PATCH_CLEANSER="--patchcleanser"
 
 # File/path locations
 #CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_64_masknumfr_6_masknumsr_6/resnet/03-23-2024/trial_2_vanilla/cached_outputs
 #CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_64_masknumfr_6_masknumsr_6/ViT/03-20-2024/trial_2_vanilla/cached_outputs
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_64_masknumfr_6_masknumsr_6/resnet/04-13-2024/trial_2_cutout_224_onecyclelr_mixedprec_ema_epoch9/cached_outputs
-CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_55_masknumfr_6_masknumsr_6/ViT/07-25-2024/trial_2_vanilla/cached_outputs
+CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_64_masknumfr_6_masknumsr_6/resnet/08-16-2024/trial_2_greedycutout_patch_64_masknum_6_training_onecyclelr_mixedprec_ema_epoch9/cached_outputs
+#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_55_masknumfr_6_masknumsr_6/ViT/07-25-2024/trial_2_vanilla/cached_outputs
 
 for THRE in ${THRE_ARR[@]};
 do

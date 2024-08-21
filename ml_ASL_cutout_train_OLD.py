@@ -13,20 +13,18 @@ import torchvision.transforms as transforms
 from torch.optim import lr_scheduler
 from torch.cuda.amp import GradScaler, autocast
 import os
-import json
 
 from pathlib import Path
 from contextlib import nullcontext
 from datetime import date
 todaystring = date.today().strftime("%m-%d-%Y")
 
-from utils.defense import gen_mask_set
 from utils.metrics import PerformanceMetrics
-from utils.datasets import CocoDetection, TransformWrapper
-from utils.training_helpers import Cutout, GreedyCutout, ModelEma
+from utils.datasets import CocoDetection
+from utils.training_helpers import Cutout, ModelEma
 
 import sys
-sys.path.append("packages/ASL/")
+sys.path.append("ASL/")
 from packages.ASL.src.models import create_model
 from packages.ASL.src.loss_functions.losses import AsymmetricLoss
 
@@ -48,10 +46,8 @@ parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 
 # Training specifics
 parser.add_argument('--lr', default=1e-4, type=float, help='maximum learning rate (default: 1e-4)')
-parser.add_argument('--cutout-size', default=224, type=int, help='size of random cutout masks (default: 224)')
-parser.add_argument('--cutout-type', choices=["randomcutout", "greedycutout"], default="greedycutout")
-parser.add_argument('--greedy-cutout-path', default='./greedy_cutout_dict.json', type=str)
-
+parser.add_argument('--cutout-size', default=224, type=int, help='size of cutout masks (default: 224)')
+# add an option here for "greedy cutout" along with a config file path; if tru, then need to load this in using JSON
 parser.add_argument('--amp', action='store_true', help='enable automatic mixed precision (AMP); to disable, run --no-amp as the arg')
 parser.add_argument('--no-amp', dest='amp', action='store_false', help='disable automatic mixed precision (AMP); to enable, run --amp as the arg')
 parser.set_defaults(amp=True)
@@ -67,40 +63,17 @@ def file_print(file_path, msg):
 
 def main():
     args = parser.parse_args()
-    args.do_bottleneck_head = False 
+    args.do_bottleneck_head = False
 
-    # Choose between different types of cutout
-    if args.cutout_type == "randomcutout":
-        cutout_str = f"randomcutout/size_{args.cutout_size}"
-        cutout_transform = TransformWrapper(Cutout(n_holes=2, length=args.cutout_size))
-    elif args.cutout_type == "greedycutout":
-        with open(args.greedy_cutout_path) as f:
-            data = json.load(f)
+    cutout_len = args.cutout_size  
 
-        # Extract metadata from the greedy cutout dict
-        greedy_cutout_metadata = data["metadata"]
-        gc_im_size = greedy_cutout_metadata["image_size"]
-        gc_patch_size = greedy_cutout_metadata["patch_size"]
-        gc_mask_num = greedy_cutout_metadata["mask_number_fr"]
-        
-        # Create R-covering mask set
-        mask_list, mask_size, mask_stride = gen_mask_set([gc_im_size, gc_im_size], [gc_patch_size, gc_patch_size], [gc_mask_num, gc_mask_num])
-
-        # Generate string-based identifier
-        metadata_str = f"patch_{gc_patch_size}_masknum_{gc_mask_num}"
-        cutout_str = f"greedycutout/{metadata_str}"
-
-        # Initialize greedy cutout transform
-        greedy_cutout_data = data["data"]
-        cutout_transform = GreedyCutout(mask_list=mask_list, greedy_cutout_data=greedy_cutout_data)
-        
     # Construct file path for saving metrics -> SPECIFY HERE IF GREEDY CUTOUT IS USED AND MODEL ARCHITECTURE
-    training_specifics = (f"training" + 
+    training_specifics = (f"cutout_{cutout_len}" + 
                         f"{f'_{args.lr_scheduler}' if args.lr_scheduler != 'none' else ''}" +
                         f"{f'_mixedprec' if args.amp else ''}" +
                         f"{f'_ema' if args.ema_decay_rate > 0 else ''}")
 
-    foldername = f"/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/{args.dataset_name}/resnet_trained/{cutout_str}/{training_specifics}/{todaystring}/trial_{args.trial}/"
+    foldername = f"/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/{args.dataset_name}/{training_specifics}/{todaystring}/trial_{args.trial}/"
     Path(foldername).mkdir(parents=True, exist_ok=True)
     args.save_dir = foldername
     args.logging_file = foldername + "logging.txt"
@@ -132,17 +105,20 @@ def main():
     val_dataset = CocoDetection(data_path_val,
                                 instances_path_val,
                                 transforms.Compose([
-                                    TransformWrapper(transforms.Resize((args.image_size, args.image_size))),
-                                    TransformWrapper(transforms.ToTensor()),
+                                    transforms.Resize((args.image_size, args.image_size)),
+                                    transforms.ToTensor(),
                                     # normalize, # no need, toTensor does normalization
                                 ]))
-
+    
+    # GIVE AN OPTION FOR THE TWO TYPES OF CUTOUT HERE, GREEDY CUTOUT NEEDS AN ADDITIONAL CLASS IN TRAINING_HELPERS.PY
+    # USE THIS: https://stackoverflow.com/questions/75722946/pytorch-custom-transformation-with-additional-argument-in-call
+    
     train_dataset = CocoDetection(data_path_train,
                                   instances_path_train,
                                   transforms.Compose([
-                                        TransformWrapper(transforms.Resize((args.image_size, args.image_size))),
-                                        TransformWrapper(transforms.ToTensor()),
-                                        cutout_transform,
+                                      transforms.Resize((args.image_size, args.image_size)),
+                                      transforms.ToTensor(),
+                                      Cutout(n_holes=2, length=cutout_len),
                                       # normalize, # no need, toTensor does normalization
                                   ]))
     file_print(args.logging_file, f"len(val_dataset): {len(val_dataset)}")
@@ -161,6 +137,7 @@ def main():
     train_multi_label_coco(model, train_loader, val_loader, args.lr, args)
 
 def train_multi_label_coco(model, train_loader, val_loader, lr, args):
+
     # Initialize EMA
     ema = ModelEma(model, args.ema_decay_rate) if (args.ema_decay_rate > 0) else None
 
@@ -181,14 +158,10 @@ def train_multi_label_coco(model, train_loader, val_loader, lr, args):
 
     lowest_val_loss = np.inf
     for epoch in range(epochs):
-        file_print(args.logging_file, f'\nEpoch [{epoch}/{epochs}]')
-        model.train()
         file_print(args.logging_file, "starting training...")
 
-        for batch_index, batch in enumerate(train_loader):
-            input_data = batch[0]
-            target = batch[1]
-
+        model.train()
+        for i, (input_data, target) in enumerate(train_loader):
             input_data = input_data.cuda()
             target = target.cuda()    # (batch,3,num_classes)
             target = target.max(dim=1)[0]
@@ -209,9 +182,8 @@ def train_multi_label_coco(model, train_loader, val_loader, lr, args):
             if ema: ema.update(model)    # Update EMA checkpoints
 
             # display information
-            if batch_index % 100 == 0:
-                batch_info = f"Batch: [{batch_index}/{len(train_loader)}]"
-                file_print(args.logging_file, f"{batch_info:<24}{'-->':<8}LR: {current_lr:.1e}, Loss: {loss.item():.1f}")
+            if i % 100 == 0:
+                file_print(args.logging_file, f'Epoch [{epoch}/{epochs}], Step [{i}/{len(train_loader)}], LR {current_lr:.1e}, Loss: {loss.item():.1f}')
         
         save_model = ema.module if ema else model
         save_model.eval()
@@ -220,6 +192,7 @@ def train_multi_label_coco(model, train_loader, val_loader, lr, args):
         # Save the checkpoints associated with current epoch
         checkpoints = {"model":save_model.state_dict(), "epoch":epoch, "num_classes":args.num_classes, "idx_to_class":args.classes_dict}
         try:
+
             save_model_dir = args.save_dir + f'epoch_{epoch}/'
             Path(save_model_dir).mkdir(parents=True, exist_ok=True)
             torch.save(checkpoints, save_model_dir + f"{'ema-' if ema else ''}model-epoch-{epoch}.pth")
@@ -235,17 +208,16 @@ def train_multi_label_coco(model, train_loader, val_loader, lr, args):
                 pass
 
 def validate_multi(val_loader, model, args):
-    file_print(args.logging_file, "\nstarting validation...")
+    file_print(args.logging_file, "starting validation...")
     Sig = torch.nn.Sigmoid()
     preds_regular = []
     targets = []
     metrics = PerformanceMetrics(args.num_classes)
     criterion = AsymmetricLoss(gamma_neg=4, gamma_pos=0, clip=0.05, disable_torch_grad_focal_loss=True)
     total_loss = 0.0
-    for batch_index, batch in enumerate(val_loader):
-        input_data = batch[0]
-        target = batch[1]
+    for i, (input_data, target) in enumerate(val_loader):
 
+        target = target
         target = target.max(dim=1)[0]
         # compute output
         with torch.no_grad():
@@ -275,12 +247,13 @@ def validate_multi(val_loader, model, args):
         precision_o, recall_o = metrics.overallPrecision(), metrics.overallRecall()
         precision_c, recall_c = metrics.averageClassPrecision(), metrics.averageClassRecall()
 
-        if (batch_index % 100 == 0):
-            batch_info = f"Batch: [{batch_index}/{len(val_loader)}]"
-            file_print(args.logging_file, f"{batch_info:<24}{'-->':<8}P_O: {precision_o:.2f}, R_O: {recall_o:.2f}, P_C: {precision_c:.2f}, R_C: {recall_c:.2f}, Loss: {loss.item():.2f}")
+        if (i % 100 == 0):
+            file_print(args.logging_file, f'Batch: [{i}/{len(val_loader)}]')
+            file_print(args.logging_file, f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f} loss {loss.item():.2f}\n')
     
     average_loss = total_loss / len(val_loader.dataset)
-    file_print(args.logging_file, f"{'[===Final Results===]':<24}{'-->':<8}P_O: {precision_o:.2f}, R_O: {recall_o:.2f}, P_C: {precision_c:.2f}, R_C: {recall_c:.2f}, Average Loss: {average_loss:.4f}")
+    file_print(args.logging_file, f'Final Results:')
+    file_print(args.logging_file, f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f} average loss {average_loss:.4f}\n')
 
     return average_loss
 

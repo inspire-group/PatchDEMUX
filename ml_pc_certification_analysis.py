@@ -1,3 +1,6 @@
+# TODO:
+# - SHOULD GO ALONG WITH ML_PC_VISUALIZATION AS AN OBSERVATION LEVEL SCRIPT...
+
 # Adopted from: https://github.com/Alibaba-MIIL/ASL/blob/main/validate.py
 
 import argparse
@@ -87,7 +90,7 @@ def main():
                                 transforms.Compose([
                                     transforms.Resize((args.image_size, args.image_size)),
                                     transforms.ToTensor(),
-                                    normalize,
+                                    # normalize, # no need, toTensor does normalization
                                 ]))
 
     args.img_id = val_dataset.ids[args.image_index]

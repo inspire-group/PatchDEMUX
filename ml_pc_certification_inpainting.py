@@ -1,3 +1,6 @@
+# TODO:
+# - EVENTUALLY DELETE...
+
 # Adopted from: https://github.com/Alibaba-MIIL/ASL/blob/main/validate.py
 
 import argparse

@@ -1,6 +1,3 @@
-# TODO:
-# - WILL BE REPLACED BY ML_PC_CERTIFICATION_RESIDUAL_ROBUSTNESS_VIT.PY
-
 # Adopted from: 
 # - https://github.com/Alibaba-MIIL/ASL/blob/main/validate.py
 # - https://github.com/SlongLiu/query2labels/blob/main/q2l_infer.py 
@@ -25,11 +22,13 @@ todaystring = date.today().strftime("%m-%d-%Y")
 
 from utils.defense import gen_mask_set
 from utils.metrics import PerformanceMetrics
-from utils.datasets import CocoDetection, split_dataset_gpu
+from utils.datasets import CocoDetection, split_dataset_gpu, TransformWrapper
+from utils.training_helpers import Cutout
 
 import sys
 sys.path.append("packages/ASL/")
 from packages.ASL.src.models import create_model
+from packages.ASL.src.loss_functions.losses import AsymmetricLoss
 
 sys.path.append("packages/query2labels/lib")
 from packages.query2labels.lib.models.query2label import build_q2l
@@ -50,7 +49,6 @@ available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
 parser.add_argument('--model-name', choices=available_models, default='tresnet_l')
 parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
-parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
 
 # * Transformer
 parser.add_argument('--config', type=str, help='config file')
@@ -90,7 +88,7 @@ parser.add_argument('--total-num-gpu', default=1, type=int, help='total number o
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
 parser.add_argument('--trial-type', default="vanilla", type=str, help='type of checkpoints used with the trial (default: vanilla/unmodified)')
-parser.add_argument('--print-freq', '-p', default=64, type=int, help='print frequency (default: 64)')
+parser.add_argument('--print-freq', '-p', default=64, type=int, help='print frequency (default: 64)') # is this even used anywhere????
 
 def file_print(file_path, msg):
     with open(file_path, "a") as f:
@@ -107,6 +105,7 @@ def clean_state_dict(state_dict):
 
 # Load in the multi-label classifier
 def load_model(args, is_ViT):
+    args.do_bottleneck_head = False
 
     # Create model
     model = build_q2l(args).cuda() if is_ViT else create_model(args).cuda()
@@ -157,11 +156,12 @@ def main():
     world_gpu_id = args.world_gpu_id
 
     # Construct file path for saving metrics
-    foldername = f"dump/certification/{args.dataset_name}/patch_{args.patch_size}_masknumfr_{args.mask_number_fr}_masknumsr_{args.mask_number_sr}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}_thre_{(int)(args.thre * 100)}percent/gpu_world_id_{args.world_gpu_id}/"
+    args.metadata = f"patch_{args.patch_size}_masknumfr_{args.mask_number_fr}_masknumsr_{args.mask_number_sr}"
+    foldername = f"dump/greedy_cutout/{args.dataset_name}/{args.metadata}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}/gpu_world_id_{args.world_gpu_id}/"
     Path(foldername).mkdir(parents=True, exist_ok=True)
     args.save_dir = foldername
     args.logging_file = foldername + "logging.txt"
-
+    
     # Setup model
     model, args, classes_list = load_model(args, is_ViT)
 
@@ -169,24 +169,25 @@ def main():
     normalize = transforms.Normalize(mean=[0, 0, 0],
                                      std=[1, 1, 1])
 
-    instances_path = os.path.join(args.data, 'annotations/instances_val2014.json')
-    data_path = os.path.join(args.data, 'images/val2014')
-    val_dataset = CocoDetection(data_path,
-                                instances_path,
+
+    instances_path_train = os.path.join(args.data, 'annotations/instances_train2014.json')
+    data_path_train = os.path.join(args.data, 'images/train2014')  # args.data
+    train_dataset = CocoDetection(data_path_train,
+                                instances_path_train,
                                 transforms.Compose([
-                                    transforms.Resize((args.image_size, args.image_size)),
-                                    transforms.ToTensor(),
+                                    TransformWrapper(transforms.Resize((args.image_size, args.image_size))),
+                                    TransformWrapper(transforms.ToTensor()),
                                     # normalize, # no need, toTensor does normalization
                                 ]))
 
 
     # Create GPU specific dataset
-    gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(val_dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
+    gpu_train_dataset, start_idx, end_idx = split_dataset_gpu(train_dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
     file_print(args.logging_file, "listing out info about this GPU process...")
-    file_print(args.logging_file, f"length of gpu_val_dataset: {len(gpu_val_dataset)}\nbatch is currently at: {(int)(start_idx / args.batch_size)}\nstart_idx: {start_idx}\nend_idx: {end_idx}")
+    file_print(args.logging_file, f"length of gpu_val_dataset: {len(gpu_train_dataset)}\nbatch is currently at: {(int)(start_idx / args.batch_size)}\nstart_idx: {start_idx}\nend_idx: {end_idx}")
 
-    val_loader = torch.utils.data.DataLoader(
-        gpu_val_dataset, batch_size=args.batch_size, shuffle=False,
+    train_loader = torch.utils.data.DataLoader(
+        gpu_train_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
     # Create R-covering set of masks for both the first and second rounds
@@ -203,76 +204,117 @@ def main():
         mask_list_sr = mask_list_fr
         mask_round_equal = True
 
-    validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args)
+    greedy_cutout_generation(model, train_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args)
 
-def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args):
+# Essentially, we are going to work with batches of data and in this function we will loop over masks. For each mask, we input the size 64 batch into the model
+# and then ONE-BY-ONE (i.e., the ASL loss function only returns a single value) compute the loss for each of these images. Have an array which for each of the 64
+# images maintains the current mask index with the worst loss. Once done, we return this array (and optionally the corresponding loss values) back to the caller
+
+# In the main function, after doing this once we have the worst single mask for each of the 64 images. Now, we find the worst double mask. Specifically, we consider
+# each single mask one at a time and determine which set of the 64 images have this as their worst mask. We then call this function on the subset of images (with the first round mask applied).
+# Note that the function should still work, although now the subset of data is of size <= 64. After computing worst mask index + loss, return to main. Main should have the image indices corresponding
+# to the subset, so we can update a global array with the worst case two-mask pairs. Do this for each possible first round mask (i.e., using a loop) and then we will have a size 
+# 64 array with the first + second round worst case masks and loss. Finally, we convert this to a dictionary with the file name being the key. 
+def mask_set_optimum_loss(model, im_data, targets_data, mask_list, criterion, args):
+    data_len = len(im_data)
+    mask_optima = np.zeros(data_len,)
+    losses = np.zeros(data_len,)
+
+    # Iterate through the set of individual masks
+    for i, mask in enumerate(mask_list):
+        mask = mask.reshape(1, 1, *mask.shape).to(args.rank)            
+        masked_im = torch.where(mask, im_data.to(args.rank), torch.tensor(0.0).to(args.rank))
+            
+        # Compute output
+        with torch.no_grad():
+            output = model(masked_im).to(args.rank)
+
+        # Determine the loss for each image, and determine if the optimum mask location has changed - check validation loss here and make sure it is about 67!!! (train loss is about 20)
+        for j in range(data_len):
+            loss = criterion(torch.Tensor(output[j]).to(args.rank), torch.Tensor(targets_data[j]).to(args.rank))
+
+            if loss.item() > losses[j]: 
+                losses[j] = loss
+                mask_optima[j] = i
+
+    return mask_optima, losses
+
+def greedy_cutout_generation(model, train_loader, classes_list, mask_list_fr, mask_list_sr, mask_round_equal, args):
     file_print(args.logging_file, "starting actual validation...")
 
-    Sig = torch.nn.Sigmoid()
+    criterion = AsymmetricLoss(gamma_neg=4, gamma_pos=0, clip=0.05, disable_torch_grad_focal_loss=True)
 
     preds = []
     targets = []
     num_masks_fr, num_masks_sr = len(mask_list_fr), len(mask_list_sr)
     num_classes = len(classes_list)
 
-    metrics = PerformanceMetrics(num_classes)
+    # Create a dictionary to store all of the "greedy cutout" mask indices corresponding to each individual image
+    greedy_cutout_dict = {}
 
     # target shape: [batch_size, object_size_channels, number_classes]
-    for batch_index, (input_data, target) in enumerate(val_loader):
+    for batch_index, batch in enumerate(train_loader):
         
-        file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
+        input_data = batch[0]
+        target = batch[1]
+        paths = batch[2]
+
+        file_print(args.logging_file, f'\nBatch: [{batch_index}/{len(train_loader)}]')
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
         im = input_data
         target = target.cpu().numpy()
 
-        # Initialize all_preds to -1 in order to filter out unused mask combinations at the end
-        all_preds = np.zeros([im.shape[0], num_masks_fr * num_masks_sr, num_classes]) - 1
-        for i, mask1 in enumerate(mask_list_fr):
-            mask1 = mask1.reshape(1, 1, *mask1.shape).to(args.rank)            
-            start = i if mask_round_equal else 0
+        # Determine the first round masks which result in the worst loss
+        fr_mask_optima, _ = mask_set_optimum_loss(model, im, target, mask_list_fr, criterion, args)
+        file_print(args.logging_file, f'first round masks found...')
 
-            file_print(args.logging_file, f"Certification is {(i / num_masks_fr) * 100:0.2f}% complete!")
-            for j, mask2 in enumerate(mask_list_sr[start:]):
-                mask2 = mask2.reshape(1, 1, *mask2.shape).to(args.rank)
-                masked_im = torch.where(torch.logical_and(mask1, mask2), im.to(args.rank), torch.tensor(0.0).to(args.rank))
+        # For each single mask, find the subset of images from the batch which have this as their 
+        # optimum mask; then apply the second round of masking to find the double mask pair which
+        # results in the worst loss
+        file_print(args.logging_file, f'starting search for second round masks...')
+        cumulative_indices = []
+        sr_mask_optima = np.zeros(len(im),)
+        losses = np.zeros(len(im),)
+        for i, mask in enumerate(mask_list_fr):
+            if (i % 10 == 0): file_print(args.logging_file, f'computing images associated with first round mask {i} out of {len(mask_list_fr)}')
+            subset_indices = np.nonzero(fr_mask_optima == i)[0]
+            if len(subset_indices) == 0: continue   # If this mask is not the optimum for any image in the batch, we can skip it
+            cumulative_indices.extend(subset_indices)
 
-                # compute output
-                with torch.no_grad():
-                    output = Sig(model(masked_im).to(args.rank)).cpu()
+            subset_images = im[subset_indices]
+            subset_targets = target[subset_indices]
 
-                pred = output.data.gt(args.thre).long()
-                all_preds[:, i * num_masks_sr + j] = pred.cpu().numpy()
-        
-        # Filter out unused mask combinations
-        duplicate_filter = np.all(all_preds == -1, axis=(0,2))
-        all_preds = all_preds[:, np.logical_not(duplicate_filter), :]
+            # Apply the optimum first round masks to the image subset
+            mask = mask.reshape(1, 1, *mask.shape).to(args.rank)            
+            masked_subset_images = torch.where(mask, subset_images.to(args.rank), torch.tensor(0.0).to(args.rank))
 
-        # Find which classes had consensus in masked predictions
-        all_preds_ones = np.all(all_preds, axis=1)
-        all_preds_zeros = np.all(np.logical_not(all_preds), axis=1)
-        
-        # Compute certified TP, TN, FN, FP
-        confirmed_tp = np.logical_and(all_preds_ones, target).astype(int)
-        confirmed_tn = np.logical_and(all_preds_zeros, np.logical_not(target)).astype(int)
-        worst_case_fn = np.logical_and(np.logical_not(all_preds_ones), target).astype(int)
-        worst_case_fp = np.logical_and(np.logical_not(all_preds_zeros), np.logical_not(target)).astype(int)
+            # Determine second round masks which result in the worst loss for this image subset
+            subset_sr_mask_optima, subset_losses = mask_set_optimum_loss(model, masked_subset_images, subset_targets, mask_list_fr, criterion, args)
 
-        # Compute certified precision and recall
-        metrics.updateMetrics(TP=confirmed_tp, TN=confirmed_tn, FN=worst_case_fn, FP=worst_case_fp)
-        precision_o, recall_o = metrics.overallPrecision(), metrics.overallRecall()
-        precision_c, recall_c = metrics.averageClassPrecision(), metrics.averageClassRecall()
+            # Update the global arrays corresponding to second round mask optima
+            sr_mask_optima[subset_indices] = subset_sr_mask_optima
+            losses[subset_indices] = subset_losses
 
-        file_print(args.logging_file, f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f}\n')
+        cumulative_indices = sorted(cumulative_indices)
+        assert len(cumulative_indices) == len(im)
+        for i in range(len(cumulative_indices)):
+            assert cumulative_indices[i] == i
 
-    # Save the certified TP, TN, FN, FP
-    np.savez(args.save_dir + f"certified_metrics", TP=metrics.TP, TN=metrics.TN, FN=metrics.FN, FP=metrics.FP)
+        # Update the global dictionary
+        file_print(args.logging_file, f'second round masks found...')
+        greedy_cutout_dict = greedy_cutout_dict | {paths[i]: {"fr_mask": fr_mask_optima[i], "sr_mask": sr_mask_optima[i], "loss": losses[i]} for i in range (len(im))}
 
-    # Save the precision and recall metrics
-    with open(args.save_dir + f"performance_metrics.txt", "w") as f:
-        f.write(f"P_O: {precision_o:.2f} \t R_O: {recall_o:.2f}\n")
-        f.write(f"P_C: {precision_c:.2f} \t R_C: {recall_c:.2f}")
+        # Save the current state of the global dictionary every batch
+        with open(args.save_dir + f"greedy_cutout_dict.json", "w") as f:
+            json.dump(greedy_cutout_dict, f, indent=2)
+
+    # Save the final state of the global dictionary along with metadata
+    metadata = {"image_size": args.image_size, "patch_size": args.patch_size, "mask_number_fr": args.mask_number_fr, "mask_number_sr": args.mask_number_sr}
+    greedy_cutout_dict = {"metadata": metadata, "data": greedy_cutout_dict}
+    with open(args.save_dir + f"greedy_cutout_dict.json", "w") as f:
+        json.dump(greedy_cutout_dict, f, indent=2)
 
     return
 

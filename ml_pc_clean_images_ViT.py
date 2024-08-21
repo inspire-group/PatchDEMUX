@@ -184,7 +184,7 @@ def main():
                                 transforms.Compose([
                                     transforms.Resize((args.image_size, args.image_size)),
                                     transforms.ToTensor(),
-                                    normalize,
+                                    # normalize, # no need, toTensor does normalization
                                 ]))
 
     # Create GPU specific dataset
@@ -215,7 +215,7 @@ def predict(model, im, target, criterion, model_config):
         output_regular = Sig(output).cpu()
 
     # Compute loss and predictions
-    loss = criterion(output.to(rank), target.to(rank))
+    loss = criterion(output.to(rank), target.to(rank))  # sigmoid will be done in loss !
     pred = output_regular.detach().gt(thre).long()
 
     return pred, loss.item()
@@ -233,11 +233,11 @@ def validate_multi(model, val_loader, classes_list, args, mask_list_fr = None):
     total_loss = 0.0
 
     # target shape: [batch_size, object_size_channels, number_classes]
-    for batch_index, (input, target) in enumerate(val_loader):
+    for batch_index, (input_data, target) in enumerate(val_loader):
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
-        im = input.to(args.rank)
+        im = input_data.to(args.rank)
 
         # Compute output
         pred, loss = (double_masking(im, mask_list_fr, num_classes, model, model_config), np.nan) if mask_list_fr else predict(model, im, target, criterion, model_config)

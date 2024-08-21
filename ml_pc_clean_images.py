@@ -1,3 +1,6 @@
+# TODO:
+# - WILL BE REPLACED BY ML_PC_CLEAN_IMAGES_VIT.PY
+
 # Adopted from: https://github.com/Alibaba-MIIL/ASL/blob/main/validate.py
 
 import argparse
@@ -100,7 +103,7 @@ def main():
                                 transforms.Compose([
                                     transforms.Resize((args.image_size, args.image_size)),
                                     transforms.ToTensor(),
-                                    normalize,
+                                    # normalize, # no need, toTensor does normalization
                                 ]))
 
     # Create GPU specific dataset
@@ -148,11 +151,11 @@ def validate_multi(model, val_loader, classes_list, args, mask_list_fr = None):
     criterion = AsymmetricLoss(gamma_neg=4, gamma_pos=0, clip=0.05, disable_torch_grad_focal_loss=True)
     total_loss = 0.0
     # target shape: [batch_size, object_size_channels, number_classes]
-    for batch_index, (input, target) in enumerate(val_loader):
+    for batch_index, (input_data, target) in enumerate(val_loader):
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
-        im = input.to(args.rank)
+        im = input_data.to(args.rank)
 
         # Compute output
         pred, loss = (double_masking(im, mask_list_fr, num_classes, model, model_config), np.nan) if mask_list_fr else predict(model, im, target, criterion, model_config)

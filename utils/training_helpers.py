@@ -8,7 +8,7 @@ class Cutout(object):
 
     Args:
         n_holes (int): Number of patches to cut out of each image.
-        length (int): The length (in pixels) of each square patch.
+        length  (int): The length (in pixels) of each square patch.
     """
     def __init__(self, n_holes, length):
         self.n_holes = n_holes
@@ -42,6 +42,44 @@ class Cutout(object):
         img_masked = torch.where(mask, img, torch.tensor(0.0))
 
         return img_masked
+
+class GreedyCutout(object):
+    """Applies a pair of masks which greedily induce high loss
+
+    Args:
+        mask_list          (list): Set of candidate masks
+        greedy_cutout_data (dict): Specifies which mask pair is the greedy optimum for each image
+    """
+    def __init__(self, mask_list, greedy_cutout_data):
+        self.mask_list = mask_list
+        self.greedy_cutout_data = greedy_cutout_data
+
+    # - apply transformerwrapper to the non greedy cutout transforms in cutout_trian.py
+    # - in datasets, ensure that we are now pasing tuple (im, file_name) into the overall transform
+    # - here, just read from the data and apply the two masks to the input image before returning (check manually that the loss is still correct, and save a sample image to disk!)
+    def __call__(self, input_data):
+        """
+        Args:
+            data (tuple): consists of an image and its filename
+        Returns:
+            Tensor: Image augmented with the mask pair specified in greedy_cutout_data
+        """
+        im, file_name = input_data
+
+        # Get the mask indices
+        fr_mask_idx = int(self.greedy_cutout_data[file_name]["fr_mask"])
+        sr_mask_idx = int(self.greedy_cutout_data[file_name]["sr_mask"])
+
+        # Obtain the masks
+        fr_mask = self.mask_list[fr_mask_idx]
+        sr_mask = self.mask_list[sr_mask_idx]
+
+        # Construct the masked image
+        combined_mask = torch.logical_and(fr_mask, sr_mask)
+        combined_mask = combined_mask.reshape(1, *combined_mask.shape)         
+        img_masked = torch.where(combined_mask, im, torch.tensor(0.0))
+
+        return img_masked, file_name
 
 # Sourced from: https://github.com/huggingface/pytorch-image-models/blob/main/timm/utils/model_ema.py
 class ModelEma(torch.nn.Module):

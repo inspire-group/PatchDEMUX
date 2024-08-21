@@ -18,6 +18,7 @@ from collections import OrderedDict
 
 from pathlib import Path
 import glob
+from natsort import natsorted, ns
 from datetime import date
 todaystring = date.today().strftime("%m-%d-%Y")
 
@@ -76,7 +77,7 @@ def certify_cache(mask_list_fr, mask_list_sr, mask_round_equal, args):
     file_print(args.logging_file, "starting certification...")
 
     # Find all .npz files corresponding to the cached outputs
-    cached_list = glob.glob(f'{args.cache_location}/*.npz')
+    cached_list = natsorted(glob.glob(f'{args.cache_location}/*.npz'), key=lambda y: y.lower())
 
     # Initialize variables for certifiation
     Sig = torch.nn.Sigmoid()

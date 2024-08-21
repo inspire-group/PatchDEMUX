@@ -22,7 +22,7 @@ todaystring = date.today().strftime("%m-%d-%Y")
 
 from utils.defense import gen_mask_set
 from utils.metrics import PerformanceMetrics
-from utils.datasets import CocoDetection, split_dataset_gpu
+from utils.datasets import CocoDetection, split_dataset_gpu, TransformWrapper
 
 import sys
 sys.path.append("packages/ASL/")
@@ -173,13 +173,12 @@ def main():
     instances_path = os.path.join(args.data, 'annotations/instances_val2014.json')
     data_path = os.path.join(args.data, 'images/val2014')
     val_dataset = CocoDetection(data_path,
-                                instances_path,
-                                transforms.Compose([
-                                    transforms.Resize((args.image_size, args.image_size)),
-                                    transforms.ToTensor(),
-                                    normalize,
-                                ]))
-
+                            instances_path,
+                            transforms.Compose([
+                                TransformWrapper(transforms.Resize((args.image_size, args.image_size))),
+                                TransformWrapper(transforms.ToTensor()),
+                                # normalize, # no need, toTensor does normalization
+                            ]))
 
     # Create GPU specific dataset
     gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(val_dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
@@ -217,13 +216,15 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
     num_classes = len(classes_list)
 
     # target shape: [batch_size, object_size_channels, number_classes]
-    for batch_index, (input, target) in enumerate(val_loader):
-        file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
+    for batch_index, batch in enumerate(val_loader):
+        input_data = batch[0]
+        target = batch[1]
+        file_print(args.logging_file, f'\nBatch: [{batch_index}/{len(val_loader)}]')
         output_dict = {}
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
-        im = input
+        im = input_data
         target = target.cpu().numpy()
         output_dict["target"] = target
 
@@ -258,12 +259,11 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
         # After obtaining the lock, check if a running total is equal to num of GPUs. If so, then create a bash script for cleaning up
 
         # Writing bash script: https://stackoverflow.com/questions/49516592/easily-creating-a-bash-script-in-python
-        # for i in {1..10}
+        # for i in {0..7}
         # do
-        #   mv gpu_world_id_$i/*.npz .
+        #   mv gpu_world_id_$i/*.npz cached_outputs/
         # done
         # then remove all the created folders....
-
     return
 
 if __name__ == '__main__':

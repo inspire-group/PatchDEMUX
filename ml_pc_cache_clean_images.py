@@ -18,6 +18,7 @@ from collections import OrderedDict
 
 from pathlib import Path
 import glob
+from natsort import natsorted, ns
 from datetime import date
 todaystring = date.today().strftime("%m-%d-%Y")
 
@@ -75,8 +76,11 @@ def predict_cache(clean_output, target, criterion, model_config):
     rank = model_config.rank
     thre = model_config.thre
 
+    # sigmoid will be done in loss, therefore apply the logit function here to undo the sigmoid from caching
+    logit_output = torch.special.logit(torch.Tensor(clean_output), eps=None)
+
     # Compute loss and predictions
-    loss = criterion(torch.Tensor(clean_output), torch.Tensor(target))
+    loss = criterion(torch.Tensor(logit_output), torch.Tensor(target))
     pred = (clean_output > thre).astype(int)
 
     return torch.Tensor(pred), loss.item()
@@ -85,7 +89,7 @@ def validate_cache(mask_list_fr, args):
     file_print(args.logging_file, "starting validation...")
 
     # Find all .npz files corresponding to the cached outputs
-    cached_list = glob.glob(f'{args.cache_location}/*.npz')
+    cached_list = natsorted(glob.glob(f'{args.cache_location}/*.npz'), key=lambda y: y.lower())
 
     # Initialize variables for validation
     preds = []

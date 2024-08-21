@@ -8,7 +8,7 @@
 #SBATCH --ntasks-per-node=1      # number of tasks per-node (choose equal to gpus) [make sure ntasks and ngpus are equal]
 #SBATCH --gpus-per-node=1        # gpus per node
 #SBATCH --cpus-per-task=8        # cpu-cores per task (>1 if multi-threaded tasks)
-#SBATCH --time=10:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=6:00:00          # total run time limit (HH:MM:SS)
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
@@ -21,25 +21,24 @@ source activate torch-env
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
 
+# Model parameters
+IMAGE_SIZE=448
+BATCH_SIZE=64
+PATCH_SIZE=64
+MASK_NUMBER_FR=3
+MASK_NUMBER_SR=3
+
+# GPU info
+WORLD_GPU_ID=0
+TOTAL_NUM_GPU=1
+
+# Misc.
+TRIAL=2
+TRIAL_TYPE="vanilla"
+
 # File/path locations
+MODEL_NAME="tresnet_l"
 DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
 MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
 
-# Model parameters
-BATCH_SIZE=64
-
-# Training specifics
-LR=0.00005
-AMP="--amp"
-LR_SCHEDULER="onecyclelr"
-EMA_DECAY_RATE=0.9997
-
-# Cutout info
-CUTOUT_SIZE=224
-CUTOUT_TYPE="greedycutout"
-GREEDY_CUTOUT_PATH="/home/djacob/multi-label-patchcleanser/dump/greedy_cutout/mscoco/patch_64_masknumfr_3_masknumsr_3/resnet/08-15-2024/trial_2_vanilla/gpu_world_id_0/greedy_cutout_dict.json"
-
-# Misc.
-TRIAL=1
-
-python ml_ASL_cutout_train.py $DATA_DIR --batch-size $BATCH_SIZE --model-path $MODEL_PATH --lr $LR --cutout-size $CUTOUT_SIZE --cutout-type $CUTOUT_TYPE --greedy-cutout-path $GREEDY_CUTOUT_PATH $AMP --lr-scheduler $LR_SCHEDULER --ema-decay-rate $EMA_DECAY_RATE --trial $TRIAL
+python ml_greedy_cutout_generation.py $DATA_DIR --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-path $MODEL_PATH --model-name $MODEL_NAME --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER_FR --mask-number-sr $MASK_NUMBER_SR --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE
