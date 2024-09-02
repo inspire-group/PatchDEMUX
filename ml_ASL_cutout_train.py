@@ -14,6 +14,7 @@ from torch.optim import lr_scheduler
 from torch.cuda.amp import GradScaler, autocast
 import os
 import json
+from collections import OrderedDict
 
 from pathlib import Path
 from contextlib import nullcontext
@@ -30,6 +31,9 @@ sys.path.append("packages/ASL/")
 from packages.ASL.src.models import create_model
 from packages.ASL.src.loss_functions.losses import AsymmetricLoss
 
+sys.path.append("packages/query2labels/lib")
+from packages.query2labels.lib.models.query2label import build_q2l
+
 parser = argparse.ArgumentParser(description='Multi-Label ASL Model Cutout Training')
 
 # Dataset specifics
@@ -37,14 +41,42 @@ parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--dataset-name', choices=["mscoco", "nuswide", "pascalvoc"], default="mscoco")
 parser.add_argument('--num-classes', default=80)
 parser.add_argument('--image-size', default=448, type=int, help='input image size (default: 448)')
-parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
+parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
                     help='number of data loading workers (default: 2)')
 parser.add_argument('-b', '--batch-size', default=64, type=int, help='mini-batch size (default: 64)')
 
 # Model specifics
-parser.add_argument('--model-name', default='tresnet_l')
+available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
+parser.add_argument('--model-name', choices=available_models, default='tresnet_l')
 parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
+parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
+
+# * Transformer
+parser.add_argument('--config', type=str, help='config file')
+parser.add_argument('--enc_layers', default=1, type=int, 
+                    help="Number of encoding layers in the transformer")
+parser.add_argument('--dec_layers', default=2, type=int,
+                    help="Number of decoding layers in the transformer")
+parser.add_argument('--dim_feedforward', default=256, type=int,
+                    help="Intermediate size of the feedforward layers in the transformer blocks")
+parser.add_argument('--hidden_dim', default=128, type=int,
+                    help="Size of the embeddings (dimension of the transformer)")
+parser.add_argument('--dropout', default=0.1, type=float,
+                    help="Dropout applied in the transformer")
+parser.add_argument('--nheads', default=4, type=int,
+                    help="Number of attention heads inside the transformer's attentions")
+parser.add_argument('--pre_norm', action='store_true')
+parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine'),
+                    help="Type of positional embedding to use on top of the image features")
+parser.add_argument('--backbone', choices=["resnet101", "CvT_w24"], default='CvT_w24', type=str,
+                    help="Name of the convolutional backbone to use")
+parser.add_argument('--keep_other_self_attn_dec', action='store_true', 
+                    help='keep the other self attention modules in transformer decoders, which will be removed default.')
+parser.add_argument('--keep_first_self_attn_dec', action='store_true',
+                    help='keep the first self attention module in transformer decoders, which will be removed default.')
+parser.add_argument('--keep_input_proj', action='store_true', 
+                    help="keep the input projection layer. Needed when the channel of image features is different from hidden_dim of Transformer layers.")
 
 # Training specifics
 parser.add_argument('--lr', default=1e-4, type=float, help='maximum learning rate (default: 1e-4)')
@@ -65,9 +97,63 @@ def file_print(file_path, msg):
     with open(file_path, "a") as f:
         print(msg, flush=True, file=f) 
 
+# Clean the state dict associated with ViT model
+def clean_state_dict(state_dict):
+    new_state_dict = OrderedDict()
+    for k, v in state_dict.items():
+        if k[:7] == 'module.':
+            k = k[7:]  # remove `module.`
+        new_state_dict[k] = v
+    return new_state_dict
+
+# Load in the multi-label classifier
+def load_model(args, is_ViT):
+    args.do_bottleneck_head = False
+
+    # Create model
+    model = build_q2l(args).cuda() if is_ViT else create_model(args).cuda()
+
+    # Setup depends on whether architecture is based on transformer or ResNet
+    file_print(args.logging_file, f"setting up the model...{'ViT' if is_ViT else 'resnet'}")
+    state = torch.load(args.model_path, map_location='cpu')
+    if is_ViT:
+        state_dict = clean_state_dict(state['state_dict'])
+        classes_list = np.ones((80, 1))
+    else:
+        state_dict = state['model']
+        classes_list = np.array(list(state['idx_to_class'].values()))
+        args.classes_dict = state['idx_to_class']
+        args.do_bottleneck_head = False
+    
+    # Load model
+    model.load_state_dict(state_dict, strict=True)
+    args.rank = 0
+
+    # Cleanup intermediate variables
+    del state
+    del state_dict
+    torch.cuda.empty_cache()
+    file_print(args.logging_file, 'done\n')
+
+    return model, args, classes_list
+
 def main():
     args = parser.parse_args()
-    args.do_bottleneck_head = False 
+
+    # Check if ViT is being used
+    is_ViT = False
+    if args.model_name == "Q2L-CvT_w24-384":
+        is_ViT = True
+
+    # update Transformer parameters with pre-defined config file
+    if args.config and is_ViT:
+        with open(args.config, 'r') as f:
+            cfg_dict = json.load(f)
+        for k,v in cfg_dict.items():
+            setattr(args, k, v)
+
+        # Update parameters corresponding to this script
+        args.image_size = args.img_size
 
     # Choose between different types of cutout
     if args.cutout_type == "randomcutout":
@@ -100,23 +186,13 @@ def main():
                         f"{f'_mixedprec' if args.amp else ''}" +
                         f"{f'_ema' if args.ema_decay_rate > 0 else ''}")
 
-    foldername = f"/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/{args.dataset_name}/resnet_trained/{cutout_str}/{training_specifics}/{todaystring}/trial_{args.trial}/"
+    foldername = f"/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/{args.dataset_name}/{'ViT' if is_ViT else 'resnet'}_trained/{cutout_str}/{training_specifics}/{todaystring}/trial_{args.trial}/"
     Path(foldername).mkdir(parents=True, exist_ok=True)
     args.save_dir = foldername
     args.logging_file = foldername + "logging.txt"
-
-    # Setup model - assume weights are from a model pretrained on MSCOCO
-    file_print(args.logging_file, 'creating and loading the model...')
-
-    state = torch.load(args.model_path, map_location='cpu')
-    args.num_classes = state['num_classes']
-    args.classes_dict = state['idx_to_class']
-    args.do_bottleneck_head = False
-    args.rank = 0
-
-    # Create model
-    model = create_model(args).cuda()
-    model.load_state_dict(state['model'], strict=True)
+    
+    # Setup model
+    model, args, classes_list = load_model(args, is_ViT)
     model.train()
     file_print(args.logging_file, 'done\n')
 
@@ -218,7 +294,11 @@ def train_multi_label_coco(model, train_loader, val_loader, lr, args):
         average_loss = validate_multi(val_loader, save_model, args)
 
         # Save the checkpoints associated with current epoch
-        checkpoints = {"model":save_model.state_dict(), "epoch":epoch, "num_classes":args.num_classes, "idx_to_class":args.classes_dict}
+        if args.model_name == "Q2L-CvT_w24-384":
+            checkpoints = {"state_dict":save_model.state_dict(), "epoch":epoch}
+        else:
+            checkpoints = {"model":save_model.state_dict(), "epoch":epoch, "num_classes":args.num_classes, "idx_to_class":args.classes_dict}
+        
         try:
             save_model_dir = args.save_dir + f'epoch_{epoch}/'
             Path(save_model_dir).mkdir(parents=True, exist_ok=True)
