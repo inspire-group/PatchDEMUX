@@ -20,9 +20,19 @@ source activate torch-env
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
 
+# File/path locations
+#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_64_masknumfr_6_masknumsr_6/resnet/03-23-2024/trial_2_vanilla/cached_outputs
+#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_55_masknumfr_6_masknumsr_6/ViT/08-30-2024/trial_2_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
+#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_32_masknumfr_6_masknumsr_6/resnet/08-29-2024/trial_2_vanilla/cached_outputs
+
+CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/ViT/patch_55_masknumfr_6_masknumsr_6/08-30-2024/trial_2_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
+
+
 #THRE_ARR=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99)
 #THRE_ARR=(0.00005 0.0001 0.0005 0.001 0.005)
-THRE_ARR=(0.01 0.05)
+#THRE_ARR=(0.01 0.05)
+#THRE_ARR=(0.52 0.54 0.56 0.58 0.62 0.64 0.66 0.68 0.72 0.74 0.76 0.78 0.82 0.84 0.86 0.88)
+THRE_ARR=(0.999 0.9999 0.99999)
 
 # Model parameters
 ARCH="ViT"
@@ -30,32 +40,27 @@ ARCH="ViT"
 if [[ "$ARCH" == "ViT" ]]; then
     IMAGE_SIZE=384
     PATCH_SIZE=55
-    #PATCH_SIZE=28
+    #PATCH_SIZE=218
 elif [[ "$ARCH" == "resnet" ]]; then
     IMAGE_SIZE=448
-    PATCH_SIZE=32
+    PATCH_SIZE=64
     #PATCH_SIZE=64
 fi
 
 MASK_NUMBER=6
 
 # Type of run
-RUN_TYPE="undefended"
+RUN_TYPE="certification"
 
 if [[ "$RUN_TYPE" == "certification" ]]; then
-    ATTACKER_TYPE="worst_case"
+    ATTACKER_TYPE="FP_attacker"
 elif [[ "$RUN_TYPE" == "defended" ]]; then
     PATCH_CLEANSER="--patchcleanser"
 elif [[ "$RUN_TYPE" == "undefended" ]]; then
     PATCH_CLEANSER="--no-patchcleanser"
 fi
 
-# File/path locations
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_64_masknumfr_6_masknumsr_6/resnet/03-23-2024/trial_2_vanilla/cached_outputs
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_55_masknumfr_6_masknumsr_6/ViT/08-30-2024/trial_2_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_32_masknumfr_6_masknumsr_6/resnet/08-29-2024/trial_2_vanilla/cached_outputs
-CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_55_masknumfr_6_masknumsr_6/ViT/08-30-2024/trial_2_randomcutout_size_192_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
-
+# Run evaluations over different thresholds
 for THRE in ${THRE_ARR[@]};
 do
     if [[ "$RUN_TYPE" == "certification" ]]; then
@@ -64,3 +69,10 @@ do
         python ml_pc_cache_clean_images.py $PATCH_CLEANSER --cache-location $CACHED_OUTPUTS --image-size $IMAGE_SIZE --thre $THRE --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER
     fi
 done
+
+# Writing bash script: https://stackoverflow.com/questions/49516592/easily-creating-a-bash-script-in-python
+# for i in {0..7}
+# do
+#   mv gpu_world_id_$i/*.npz cached_outputs/
+# done
+# then remove all the created folders....

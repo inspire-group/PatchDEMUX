@@ -1,0 +1,60 @@
+setting up the model...ViT
+done
+
+setting up the model...ViT
+done
+
+starting output generation...
+
+Batch: [0/7]
+Certification is 0.00% complete!
+Certification is 2.78% complete!
+Certification is 5.56% complete!
+Certification is 8.33% complete!
+Certification is 11.11% complete!
+Certification is 13.89% complete!
+Certification is 16.67% complete!
+Certification is 19.44% complete!
+Certification is 22.22% complete!
+Certification is 25.00% complete!
+Certification is 27.78% complete!
+Certification is 30.56% complete!
+Certification is 33.33% complete!
+Certification is 36.11% complete!
+Certification is 38.89% complete!
+Certification is 41.67% complete!
+Certification is 44.44% complete!
+Certification is 47.22% complete!
+Certification is 50.00% complete!
+Certification is 52.78% complete!
+Certification is 55.56% complete!
+Certification is 58.33% complete!
+Certification is 61.11% complete!
+Certification is 63.89% complete!
+Certification is 66.67% complete!
+Certification is 69.44% complete!
+Certification is 72.22% complete!
+Certification is 75.00% complete!
+Certification is 77.78% complete!
+Certification is 80.56% complete!
+Certification is 83.33% complete!
+Certification is 86.11% complete!
+Certification is 88.89% complete!
+Certification is 91.67% complete!
+Certification is 94.44% complete!
+Certification is 97.22% complete!
+
+Batch: [1/7]
+Certification is 0.00% complete!
+Certification is 2.78% complete!
+Certification is 5.56% complete!
+Certification is 8.33% complete!
+Certification is 11.11% complete!
+Certification is 13.89% complete!
+Certification is 16.67% complete!
+Certification is 19.44% complete!
+Certification is 22.22% complete!
+Certification is 25.00% complete!
+Certification is 27.78% complete!
+Certification is 30.56% complete!
+Certification is 33.33% complete!

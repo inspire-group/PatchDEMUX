@@ -2,6 +2,8 @@
 # - https://github.com/Alibaba-MIIL/ASL/blob/main/validate.py
 # - https://github.com/SlongLiu/query2labels/blob/main/q2l_infer.py 
 
+# NOTE: Currently altered to try and check inference time. The val dataset is altered to be a random subset
+
 import argparse
 import time
 import numpy as np
@@ -158,10 +160,11 @@ def main():
     world_gpu_id = args.world_gpu_id
 
     # Construct file path for saving metrics
-    foldername = f"/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/{args.dataset_name}/patch_{args.patch_size}_masknumfr_{args.mask_number_fr}_masknumsr_{args.mask_number_sr}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}/gpu_world_id_{args.world_gpu_id}/"
-    Path(foldername).mkdir(parents=True, exist_ok=True)
-    args.save_dir = foldername
-    args.logging_file = foldername + "logging.txt"
+    # foldername = f"/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/{args.dataset_name}/{'ViT' if is_ViT else 'resnet'}/patch_{args.patch_size}_masknumfr_{args.mask_number_fr}_masknumsr_{args.mask_number_sr}/{todaystring}/trial_{args.trial}_{args.trial_type}/gpu_world_id_{args.world_gpu_id}/"
+    # Path(foldername).mkdir(parents=True, exist_ok=True)
+    # args.save_dir = foldername
+    # args.logging_file = foldername + "logging.txt"
+    args.logging_file = "MY_CRINGE_1_logging.txt"
     
     # Setup model
     model, args, classes_list = load_model(args, is_ViT)
@@ -181,9 +184,11 @@ def main():
                             ]))
 
     # Create GPU specific dataset
-    gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(val_dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
-    file_print(args.logging_file, "listing out info about this GPU process...")
-    file_print(args.logging_file, f"length of gpu_val_dataset: {len(gpu_val_dataset)}\nbatch is currently at: {(int)(start_idx / args.batch_size)}\nstart_idx: {start_idx}\nend_idx: {end_idx}")
+    # gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(val_dataset, args.batch_size, args.total_num_gpu, world_gpu_id)
+    # file_print(args.logging_file, "listing out info about this GPU process...")
+    # file_print(args.logging_file, f"length of gpu_val_dataset: {len(gpu_val_dataset)}\nbatch is currently at: {(int)(start_idx / args.batch_size)}\nstart_idx: {start_idx}\nend_idx: {end_idx}")
+    rng = np.random.default_rng(123)
+    gpu_val_dataset = torch.utils.data.Subset(val_dataset, rng.choice(40137, 100))
 
     val_loader = torch.utils.data.DataLoader(
         gpu_val_dataset, batch_size=args.batch_size, shuffle=False,
@@ -252,7 +257,9 @@ def validate_multi(model, val_loader, classes_list, mask_list_fr, mask_list_sr, 
         output_dict["masked_output"] = all_preds
 
         # Save outputs for this batch as numpy arrays
-        np.savez(args.save_dir + f"gpu_{args.world_gpu_id}_batch_{batch_index}_outputs", **output_dict)
+        # np.savez(args.save_dir + f"gpu_{args.world_gpu_id}_batch_{batch_index}_outputs", **output_dict)
+
+        np.savez(f"gpu_{args.world_gpu_id}_batch_{batch_index}_outputs", **output_dict)
 
         # could have something here where a file is shared among all processes to track progress...
         # use a lock for this file -> https://www.geeksforgeeks.org/file-locking-in-python/

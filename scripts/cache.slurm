@@ -27,15 +27,17 @@ ARCH="ViT"
 
 if [[ "$ARCH" == "ViT" ]]; then
     IMAGE_SIZE=384
-    BATCH_SIZE=64
+    BATCH_SIZE=16
+    PATCH_SIZE=55
     #PATCH_SIZE=55
-    PATCH_SIZE=28
+    #PATCH_SIZE=28
 elif [[ "$ARCH" == "resnet" ]]; then
     IMAGE_SIZE=448
     BATCH_SIZE=64
     PATCH_SIZE=64
 fi
 
+#mask 6 run
 MASK_NUMBER_FR=6
 MASK_NUMBER_SR=6
 
@@ -47,12 +49,12 @@ TOTAL_NUM_GPU=16
 TRIAL=1
 
 # Trained model specifics
-PRETRAINED="false"
+PRETRAINED="true"
 
 if [[ "$PRETRAINED" == "true" ]]; then
     EPOCH=0
-    CUTOUT_TYPE="randomcutout"
-    CUTOUT_INFO="size_192"
+    CUTOUT_TYPE="greedycutout"
+    CUTOUT_INFO="patch_55_masknum_3"
     TRAIN_INFO="training_onecyclelr_mixedprec_ema"
 
     TRIAL_TYPE="${CUTOUT_TYPE}_${CUTOUT_INFO}_${TRAIN_INFO}_epoch${EPOCH}"
@@ -69,7 +71,7 @@ if [[ "$ARCH" == "ViT" ]]; then
     MODEL_NAME="Q2L-CvT_w24-384"
 
     if [[ "$PRETRAINED" == "true" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-29-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
+        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-31-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
     elif [[ "$PRETRAINED" == "false" ]]; then
         MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
     fi

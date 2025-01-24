@@ -21,7 +21,7 @@ from datetime import date
 todaystring = date.today().strftime("%m-%d-%Y")
 
 from utils.metrics import PerformanceMetrics
-from utils.datasets import CocoDetection, split_dataset_gpu
+from utils.datasets import CocoDetection, split_dataset_gpu, TransformWrapper
 from utils.defense import gen_mask_set, double_masking, ModelConfig
 
 import sys
@@ -182,8 +182,8 @@ def main():
     val_dataset = CocoDetection(data_path,
                                 instances_path,
                                 transforms.Compose([
-                                    transforms.Resize((args.image_size, args.image_size)),
-                                    transforms.ToTensor(),
+                                    TransformWrapper(transforms.Resize((args.image_size, args.image_size))),
+                                    TransformWrapper(transforms.ToTensor()),
                                     # normalize, # no need, toTensor does normalization
                                 ]))
 
