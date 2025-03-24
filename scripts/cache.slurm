@@ -54,7 +54,7 @@ PRETRAINED="true"
 if [[ "$PRETRAINED" == "true" ]]; then
     EPOCH=0
     CUTOUT_TYPE="greedycutout"
-    CUTOUT_INFO="patch_55_masknum_3"
+    CUTOUT_INFO="patch_55_masknum_6"
     TRAIN_INFO="training_onecyclelr_mixedprec_ema"
 
     TRIAL_TYPE="${CUTOUT_TYPE}_${CUTOUT_INFO}_${TRAIN_INFO}_epoch${EPOCH}"

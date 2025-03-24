@@ -50,3 +50,5 @@ for THRE in ${THRE_ARR[@]};
 do
     python ml_pc_clean_images.py $DATA_DIR --patchcleanser $PATCH_CLEANSER --batch-size $BATCH_SIZE --model-path $MODEL_PATH --thre $THRE --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER_FR --mask-number-sr $MASK_NUMBER_SR --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE
 done
+
+#python ml_pc_clean_images_ViT.py $DATA_DIR --patchcleanser $PATCH_CLEANSER --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH --config $CONFIG --thre $THRE --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER_FR --mask-number-sr $MASK_NUMBER_SR --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE

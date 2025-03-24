@@ -32,7 +32,7 @@ parser = argparse.ArgumentParser(description='Multi-Label PatchCleanser Certific
 # Dataset specifics
 parser.add_argument('--cache-location', help='path to cached output values')
 parser.add_argument('--dataset-name', choices=["mscoco", "nuswide", "pascalvoc"], default="mscoco")
-parser.add_argument('--num-classes', default=80)
+parser.add_argument('--num-classes', default=80, type=int)
 parser.add_argument('--image-size', default=448, type=int, help='input image size (default: 448)')
 
 # Model specifics

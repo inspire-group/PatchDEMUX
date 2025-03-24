@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description='Multi-Label PatchCleanser Certific
 # Dataset specifics
 parser.add_argument('--cache-location', help='path to cached output values')
 parser.add_argument('--dataset-name', choices=["mscoco", "nuswide", "pascalvoc"], default="mscoco")
-parser.add_argument('--num-classes', default=80)
+parser.add_argument('--num-classes', default=80, type=int)
 parser.add_argument('--image-size', default=448, type=int, help='input image size (default: 448)')
 
 # Model specifics
@@ -125,7 +125,7 @@ def certify_cache(mask_list_fr, mask_list_sr, mask_round_equal, args):
         with np.load(cached_file) as output_dict:
             target = output_dict["target"]
             masked_output = output_dict["masked_output"]
-
+    
         all_preds = (masked_output > args.thre).astype(int)
 
         # Find which classes had consensus in masked predictions

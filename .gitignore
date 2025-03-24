@@ -6,6 +6,8 @@ PatchCleanser/dump
 checkpoints
 dump
 packages
+runtime
+OLD_SCRIPT
 
 # SLURM outputs #
 ###################

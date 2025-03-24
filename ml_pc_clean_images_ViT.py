@@ -18,6 +18,7 @@ from collections import OrderedDict
 
 from pathlib import Path
 from datetime import date
+import time
 todaystring = date.today().strftime("%m-%d-%Y")
 
 from utils.metrics import PerformanceMetrics
@@ -46,7 +47,7 @@ parser.add_argument('-b', '--batch-size', default=64
 
 # Model specifics
 available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
-parser.add_argument('--model-name', choices=available_models, default='tresnet_l')
+parser.add_argument('--model-name', choices=available_models, default='Q2L-CvT_w24-384')
 parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
@@ -233,7 +234,9 @@ def validate_multi(model, val_loader, classes_list, args, mask_list_fr = None):
     total_loss = 0.0
 
     # target shape: [batch_size, object_size_channels, number_classes]
-    for batch_index, (input_data, target) in enumerate(val_loader):
+    for batch_index, batch in enumerate(val_loader):
+        input_data = batch[0]
+        target = batch[1]
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
         target = target.max(dim=1)[0]
