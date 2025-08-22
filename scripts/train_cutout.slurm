@@ -8,6 +8,7 @@
 #SBATCH --ntasks-per-node=1      # number of tasks per-node (choose equal to gpus) [make sure ntasks and ngpus are equal]
 #SBATCH --gpus-per-node=1        # gpus per node
 #SBATCH --cpus-per-task=8        # cpu-cores per task (>1 if multi-threaded tasks)
+#SBATCH --constraint="nomig&gpu40"  # request 40GB GPU without MIG partitioning
 #SBATCH --time=30:00:00          # total run time limit (HH:MM:SS)
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends

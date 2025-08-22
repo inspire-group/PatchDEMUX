@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# Cache Thresholding Evaluation Script
+# 
+# This script performs threshold sweeps on cached model outputs for all evaluation settings.
+#
+# Features:
+# - Evaluates cached model outputs across a range of threshold values
+# - Can be configured to run certification, defended clean, and undefended clean settings
+#
+# Prerequisites: Run cache generation script first to create cached outputs
+# Usage: sbatch run_cache_thresholding.slurm
+
 #SBATCH --job-name=cache_thresholding
 #SBATCH --output=slurm-%A.%a.out # stdout file
 #SBATCH --error=slurm-%A.%a.err  # stderr file
@@ -20,13 +31,9 @@ source activate torch-env
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
 
-# File/path locations
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_64_masknumfr_6_masknumsr_6/resnet/03-23-2024/trial_2_vanilla/cached_outputs
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_55_masknumfr_6_masknumsr_6/ViT/08-30-2024/trial_2_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/patch_32_masknumfr_6_masknumsr_6/resnet/08-29-2024/trial_2_vanilla/cached_outputs
-
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/ViT/patch_55_masknumfr_6_masknumsr_6/08-30-2024/trial_2_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
-CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/pascalvoc/ViT/patch_55_masknumfr_6_masknumsr_6/03-21-2025/trial_1_vanilla/cached_outputs
+# Path locations and thresholds
+CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
+CACHED_OUTPUTS=${CACHE_DIR}/cached_outputs/mscoco/ViT/patch_55_masknum_6/08-30-2024/trial_2_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0
 
 THRE_ARR_STD=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99)
 THRE_ARR_LOW1=(0.00005 0.0001 0.0005 0.001 0.005)
@@ -38,20 +45,24 @@ THRE_COMBINED=("${THRE_ARR_STD[@]}" "${THRE_ARR_LOW1[@]}" "${THRE_ARR_LOW2[@]}" 
 
 # Model parameters
 ARCH="ViT"
-DATASET_NAME="pascalvoc"
-NUM_CLASSES=20
 
 if [[ "$ARCH" == "ViT" ]]; then
     IMAGE_SIZE=384
     PATCH_SIZE=55
-    #PATCH_SIZE=218
 elif [[ "$ARCH" == "resnet" ]]; then
     IMAGE_SIZE=448
     PATCH_SIZE=64
-    #PATCH_SIZE=64
 fi
 
 MASK_NUMBER=6
+
+# Dataset info
+DATASET_NAME="mscoco"
+if [[ "$DATASET_NAME" == "mscoco" ]]; then
+    NUM_CLASSES=80
+elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
+    NUM_CLASSES=20
+fi
 
 # Type of run
 RUN_TYPE="undefended"
@@ -59,24 +70,17 @@ RUN_TYPE="undefended"
 if [[ "$RUN_TYPE" == "certification" ]]; then
     ATTACKER_TYPE="worst_case"
 elif [[ "$RUN_TYPE" == "defended" ]]; then
-    PATCH_CLEANSER="--patchcleanser"
+    DEFENSE_STATUS="--defense"
 elif [[ "$RUN_TYPE" == "undefended" ]]; then
-    PATCH_CLEANSER="--no-patchcleanser"
+    DEFENSE_STATUS="--no-defense"
 fi
 
 # Run evaluations over different thresholds
 for THRE in ${THRE_COMBINED[@]};
 do
     if [[ "$RUN_TYPE" == "certification" ]]; then
-        python ml_pc_cache_certification.py --cache-location $CACHED_OUTPUTS --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --attacker-type $ATTACKER_TYPE --thre $THRE --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER
+        python certify/pd_certify_cached.py --cache-location $CACHED_OUTPUTS --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --attacker-type $ATTACKER_TYPE --thre $THRE --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER
     else
-        python ml_pc_cache_clean_images.py $PATCH_CLEANSER --cache-location $CACHED_OUTPUTS --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --thre $THRE --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER
+        python inference/pd_infer_cached.py $DEFENSE_STATUS --cache-location $CACHED_OUTPUTS --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --thre $THRE --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER
     fi
 done
-
-# Writing bash script: https://stackoverflow.com/questions/49516592/easily-creating-a-bash-script-in-python
-# for i in {0..7}
-# do
-#   mv gpu_world_id_$i/*.npz cached_outputs/
-# done
-# then remove all the created folders....

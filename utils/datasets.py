@@ -132,5 +132,5 @@ class TransformWrapper:
         Returns:
             transformed image data
         """
-        im, file_name = data
-        return self.transform(im), file_name
+        im, im_file_name = data
+        return self.transform(im), im_file_name

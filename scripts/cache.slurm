@@ -1,6 +1,17 @@
 #!/bin/bash
 
-#SBATCH --job-name=cache_multilabel_patchcleanser_6mask_and_6mask
+# Caching Script
+# 
+# This script caches model outputs, which can be used later when sweeping model thresholds
+#
+# Features:
+# - Can be configured to run different architectures (i.e., Resnet, ViT) and different datasets (i.e., MSCOCO, PASCALVOC)
+# - Caches model outputs relevant to certification, inference, and clean settings. 
+#
+# Prerequisites: Requires ~50GB of disk space.
+# Usage: sbatch cache.slurm
+
+#SBATCH --job-name=cache_outputs_patchdemux
 #SBATCH --output=slurm-%A.%a.out # stdout file
 #SBATCH --error=slurm-%A.%a.err  # stderr file
 
@@ -8,8 +19,9 @@
 #SBATCH --ntasks-per-node=1      # number of tasks per-node (choose equal to gpus) [make sure ntasks and ngpus are equal]
 #SBATCH --gpus-per-node=1        # gpus per node
 #SBATCH --cpus-per-task=8        # cpu-cores per task (>1 if multi-threaded tasks)
-#SBATCH --time=32:00:00          # total run time limit (HH:MM:SS)
+#SBATCH --time=35:00:00          # total run time limit (HH:MM:SS)
 #SBATCH --array=0-15
+#SBATCH --constraint="nomig&gpu40"  # request 40GB GPU without MIG partitioning
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
@@ -29,17 +41,24 @@ if [[ "$ARCH" == "ViT" ]]; then
     IMAGE_SIZE=384
     BATCH_SIZE=16
     PATCH_SIZE=55
-    #PATCH_SIZE=55
-    #PATCH_SIZE=28
 elif [[ "$ARCH" == "resnet" ]]; then
     IMAGE_SIZE=448
     BATCH_SIZE=64
     PATCH_SIZE=64
 fi
 
-#mask 6 run
-MASK_NUMBER_FR=6
-MASK_NUMBER_SR=6
+MASK_NUMBER=6
+
+# Dataset info
+DATASET_NAME="mscoco"
+
+if [[ "$DATASET_NAME" == "mscoco" ]]; then
+    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
+    NUM_CLASSES=80
+elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
+    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
+    NUM_CLASSES=20
+fi
 
 # GPU info
 WORLD_GPU_ID=$SLURM_ARRAY_TASK_ID
@@ -47,32 +66,31 @@ TOTAL_NUM_GPU=16
 
 # Misc.
 TRIAL=1
+CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
 
 # Trained model specifics
-PRETRAINED="true"
+DEF_FINETUNE="true" 
 
-if [[ "$PRETRAINED" == "true" ]]; then
+if [[ "$DEF_FINETUNE" == "true" ]]; then
     EPOCH=0
     CUTOUT_TYPE="greedycutout"
     CUTOUT_INFO="patch_55_masknum_6"
     TRAIN_INFO="training_onecyclelr_mixedprec_ema"
 
     TRIAL_TYPE="${CUTOUT_TYPE}_${CUTOUT_INFO}_${TRAIN_INFO}_epoch${EPOCH}"
-elif [[ "$PRETRAINED" == "false" ]]; then
+elif [[ "$DEF_FINETUNE" == "false" ]]; then
     TRIAL_TYPE="vanilla"
 fi
 
-# File/path locations
-DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
-
-# Model weight locations
+# Model weight locations - paths should correspond to valid checkpoints for the desired dataset
 if [[ "$ARCH" == "ViT" ]]; then
     # ViT weights
     MODEL_NAME="Q2L-CvT_w24-384"
 
-    if [[ "$PRETRAINED" == "true" ]]; then
+    if [[ "$DEF_FINETUNE" == "true" ]]; then
         MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-31-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
-    elif [[ "$PRETRAINED" == "false" ]]; then
+    elif [[ "$DEF_FINETUNE" == "false" ]]; then
         MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
     fi
     
@@ -80,14 +98,23 @@ elif [[ "$ARCH" == "resnet" ]]; then
     # ResNet weights
     MODEL_NAME="tresnet_l"
 
-    if [[ "$PRETRAINED" == "true" ]]; then
+    if [[ "$DEF_FINETUNE" == "true" ]]; then
         MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/resnet_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-15-2024/trial_1/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
-    elif [[ "$PRETRAINED" == "false" ]]; then
+    elif [[ "$DEF_FINETUNE" == "false" ]]; then
         MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
     fi
 
 fi
 
-CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+# Build the python command with conditional config parameter
+PYTHON_CMD="python preprocessing/generate_cached_outputs.py $DATA_DIR --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
 
-python ml_pc_cache_generation.py $DATA_DIR --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH --config $CONFIG --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER_FR --mask-number-sr $MASK_NUMBER_SR --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE
+# Add config parameter only for ViT models
+if [[ "$ARCH" == "ViT" ]]; then
+    PYTHON_CMD="$PYTHON_CMD --config $CONFIG"
+fi
+
+PYTHON_CMD="$PYTHON_CMD --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE --cache-dir $CACHE_DIR"
+
+# Execute the command
+$PYTHON_CMD

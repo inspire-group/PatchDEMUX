@@ -13,11 +13,14 @@ class PerformanceMetrics:
 
     # Update the TP, TN, FN, and FP values
     def updateMetrics(self, TP, TN, FN, FP):
-        # If num_classes > 1: each metric assumed to be array of shape (num_values, num_classes) or list of length num_classes
-        # If num_classes = 1: each metric assumed to be array of shape (num_values, 1) or a scalar
+        # If num_classes > 1: metric assumed to be a binary array of shape (num_values, num_classes) or list of length num_classes
+        # If num_classes = 1: metric assumed to be a binary array of shape (num_values, 1) or a scalar
         def preprocessInput(metric):
             np_metric = np.array(metric)
-            return np_metric.flatten() if np_metric.ndim <= 1 else np_metric.sum(axis=0).flatten()
+            if self.num_classes == 1:
+                return np_metric.sum()
+            else:
+                return np_metric.flatten() if np_metric.ndim <= 1 else np_metric.sum(axis=0).flatten()
         
         self.TP += preprocessInput(TP)
         self.TN += preprocessInput(TN)
