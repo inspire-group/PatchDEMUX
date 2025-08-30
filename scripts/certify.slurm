@@ -53,9 +53,11 @@ DATASET_NAME="mscoco"
 
 if [[ "$DATASET_NAME" == "mscoco" ]]; then
     DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
     NUM_CLASSES=80
 elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
     DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/pascalvoc/transformer/config_new.json"
     NUM_CLASSES=20
 fi
 
@@ -65,7 +67,6 @@ TOTAL_NUM_GPU=8
 
 # Misc.
 TRIAL=1
-CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
 
 # Trained model specifics
 DEF_FINETUNE="true" 
@@ -111,7 +112,7 @@ ATTACKER_TYPE="worst_case"
 for THRE in ${THRE_ARR[@]};
 do
     # Build the python command with conditional config parameter
-    PYTHON_CMD="python certify/pd_certify.py $DATA_DIR --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
+    PYTHON_CMD="python certify/pd_certify.py $DATA_DIR --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
     
     # Add config parameter only for ViT models
     if [[ "$ARCH" == "ViT" ]]; then

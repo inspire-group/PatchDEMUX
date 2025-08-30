@@ -6,44 +6,35 @@ import argparse
 import time
 import numpy as np
 import torch
-import torch.nn.parallel
-import torch.distributed as dist
-import torch.multiprocessing as mp
-import torch.optim
-import torch.utils.data.distributed
-import torchvision.transforms as transforms
 import os
-import json
-from collections import OrderedDict
 
 from pathlib import Path
 from datetime import date
-import time
 todaystring = date.today().strftime("%m-%d-%Y")
 
-from utils.metrics import PerformanceMetrics
-from utils.datasets import CocoDetection, split_dataset_gpu, TransformWrapper
-from utils.defense import gen_mask_set, double_masking, double_masking_indiv_class, ModelConfig
-
+# Add parent directory to path so we can import from utils
 import sys
-sys.path.append("packages/ASL/")
-from packages.ASL.src.models import create_model
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
+from defenses.patchcleanser.pc_utils import gen_mask_set
+from defenses.patchcleanser.pc_infer import pc_infer_doublemasking, pc_infer_firstclass
+from utils.metrics import PerformanceMetrics
+from utils.datasets import split_dataset_gpu
+from utils.common import file_print, load_model, load_eval_dataset, ModelConfig, predict
+
+sys.path.append(os.path.join(parent_dir, "packages/ASL/"))
 from packages.ASL.src.loss_functions.losses import AsymmetricLoss
 
-sys.path.append("packages/query2labels/lib")
-from packages.query2labels.lib.models.query2label import build_q2l
-
-parser = argparse.ArgumentParser(description='Multi-Label ASL Model Validation')
+parser = argparse.ArgumentParser(description='PatchDEMUX inference runtime')
 
 # Dataset specifics
 parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--dataset-name', choices=["mscoco", "pascalvoc"], default="mscoco")
-parser.add_argument('--num-classes', default=80)
+parser.add_argument('--num-classes', default=80, type=int, help='number of classes')
 parser.add_argument('--image-size', default=448, type=int, help='input image size (default: 448)')
 parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
                     help='number of data loading workers (default: 2)')
-parser.add_argument('-b', '--batch-size', default=64
-, type=int, help='mini-batch size (default: 64)')
 
 # Model specifics
 available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
@@ -52,39 +43,15 @@ parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=st
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
 
-# * Transformer
-parser.add_argument('--config', type=str, help='config file')
-parser.add_argument('--enc_layers', default=1, type=int, 
-                    help="Number of encoding layers in the transformer")
-parser.add_argument('--dec_layers', default=2, type=int,
-                    help="Number of decoding layers in the transformer")
-parser.add_argument('--dim_feedforward', default=256, type=int,
-                    help="Intermediate size of the feedforward layers in the transformer blocks")
-parser.add_argument('--hidden_dim', default=128, type=int,
-                    help="Size of the embeddings (dimension of the transformer)")
-parser.add_argument('--dropout', default=0.1, type=float,
-                    help="Dropout applied in the transformer")
-parser.add_argument('--nheads', default=4, type=int,
-                    help="Number of attention heads inside the transformer's attentions")
-parser.add_argument('--pre_norm', action='store_true')
-parser.add_argument('--position_embedding', default='sine', type=str, choices=('sine'),
-                    help="Type of positional embedding to use on top of the image features")
-parser.add_argument('--backbone', choices=["resnet101", "CvT_w24"], default='CvT_w24', type=str,
-                    help="Name of the convolutional backbone to use")
-parser.add_argument('--keep_other_self_attn_dec', action='store_true', 
-                    help='keep the other self attention modules in transformer decoders, which will be removed default.')
-parser.add_argument('--keep_first_self_attn_dec', action='store_true',
-                    help='keep the first self attention module in transformer decoders, which will be removed default.')
-parser.add_argument('--keep_input_proj', action='store_true', 
-                    help="keep the input projection layer. Needed when the channel of image features is different from hidden_dim of Transformer layers.")
+# * Transformer config file (optional, required for ViT models)
+parser.add_argument('--config', type=str, default=None, help='config file containing all ViT parameters')
 
-# Mask set specifics
-parser.add_argument('--patchcleanser', action='store_true', help='enable PatchCleanser algorithm for inference; to disable, run --no-patchcleanser as the arg')
-parser.add_argument('--no-patchcleanser', dest='patchcleanser', action='store_false', help='disable PatchCleanser algorithm for inference; to enable, run --patchcleanser as the arg')
-parser.set_defaults(patchcleanser=True)
+# Defense specifics
+parser.add_argument('--defense', action='store_true', help='enable PatchDEMUX algorithm for inference; to disable, run --no-defense as the arg')
+parser.add_argument('--no-defense', dest='defense', action='store_false', help='run inference on an undefended model; to enable, run --defense as the arg')
+parser.set_defaults(defense=True)
 parser.add_argument('--patch-size', default=64, type=int, help='patch size (default: 64)')
-parser.add_argument('--mask-number-fr', default=6, type=int, help='mask number first round (default: 6)')
-parser.add_argument('--mask-number-sr', default=6, type=int, help='mask number second round (default: 6)')
+parser.add_argument('--mask-number', default=6, type=int, help='mask number (default: 6)')
 
 # GPU info for parallelism
 parser.add_argument('--world-gpu-id', default=0, type=int, help='overall GPU id (default: 0)')
@@ -92,152 +59,64 @@ parser.add_argument('--total-num-gpu', default=1, type=int, help='total number o
 
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
-parser.add_argument('--trial-type', default="baseline", type=str, help='type of checkpoints used with the trial (default: baseline/unmodified)')
+parser.add_argument('--trial-type', default="vanilla", type=str, help='type of checkpoints used with the trial (default: vanilla/unmodified)')
 
-def file_print(file_path, msg):
-    with open(file_path, "a") as f:
-        print(msg, flush=True, file=f) 
-
-# Clean the state dict associated with ViT model
-def clean_state_dict(state_dict):
-    new_state_dict = OrderedDict()
-    for k, v in state_dict.items():
-        if k[:7] == 'module.':
-            k = k[7:]  # remove `module.`
-        new_state_dict[k] = v
-    return new_state_dict
-
-# Load in the multi-label classifier
-def load_model(args, is_ViT):
-
-    # Setup model
-    # file_print(args.logging_file, 'creating and loading the model...')
-    # state = torch.load(args.model_path, map_location='cpu')
-    # args.num_classes = state['num_classes']
-    args.do_bottleneck_head = False
-    # args.rank = 0
-
-    # Create model
-    model = build_q2l(args).cuda() if is_ViT else create_model(args).cuda()
-
-    # Setup depends on whether architecture is based on transformer or ResNet
-    file_print(args.logging_file, f"setting up the model...{'ViT' if is_ViT else 'resnet'}")
-    state = torch.load(args.model_path, map_location='cpu')
-    if is_ViT:
-        state_dict = clean_state_dict(state['state_dict'])
-        classes_list = np.ones((80, 1))
-    else:
-        state_dict = state['model']
-        classes_list = np.array(list(state['idx_to_class'].values()))
-        args.do_bottleneck_head = False
-    
-    # Load model
-    model.load_state_dict(state_dict, strict=True)
-    args.rank = 0
-    model = model.eval()
-
-    # Cleanup intermediate variables
-    del state
-    del state_dict
-    torch.cuda.empty_cache()
-    file_print(args.logging_file, 'done\n')
-
-    return model, args, classes_list
 
 def main():
     args = parser.parse_args()
 
-    is_ViT = False
     if args.model_name == "Q2L-CvT_w24-384":
         is_ViT = True
-
-    # update Transformer parameters with pre-defined config file
-    if args.config and is_ViT:
-        with open(args.config, 'r') as f:
-            cfg_dict = json.load(f)
-        for k,v in cfg_dict.items():
-            setattr(args, k, v)
-
-        # Update parameters corresponding to this script
-        args.image_size = args.img_size
+        if args.config is None:
+            raise ValueError("--config parameter is required when using ViT models (Q2L-CvT_w24-384)")
+    else:
+        is_ViT = False
 
     # Get GPU id
     world_gpu_id = args.world_gpu_id
 
     # Construct file path for saving metrics
-    val_status = f"defended/{args.dataset_name}/patch_{args.patch_size}_masknumfr_{args.mask_number_fr}_masknumsr_{args.mask_number_sr}" if args.patchcleanser else f"undefended/{args.dataset_name}"
-    # foldername = f"dump/{val_status}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}_thre_{(int)(args.thre * 100)}percent/gpu_world_id_{args.world_gpu_id}/"
-    foldername = f"runtime/{val_status}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}_thre_{(int)(args.thre * 100)}percent/gpu_world_id_{args.world_gpu_id}/"
+    val_status = f"defended/{args.dataset_name}/patch_{args.patch_size}_masknum_{args.mask_number}" if args.defense else f"undefended/{args.dataset_name}"
+    foldername = os.path.join(parent_dir, f"runtime/{val_status}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}_thre_{(int)(args.thre * 100)}percent/gpu_world_id_{args.world_gpu_id}/")
     Path(foldername).mkdir(parents=True, exist_ok=True)
     args.save_dir = foldername
     args.logging_file = foldername + "logging_val.txt"
 
-    # build model
-    model, args, classes_list = load_model(args, is_ViT)
+    # Setup model
+    model, args = load_model(args, is_ViT)
 
     # Data loading code
-    normalize = transforms.Normalize(mean=[0, 0, 0],
-                                     std=[1, 1, 1])
+    val_dataset = load_eval_dataset(args)
 
-    instances_path = os.path.join(args.data, 'annotations/instances_val2014.json')
-    data_path = os.path.join(args.data, 'images/val2014')
-    val_dataset = CocoDetection(data_path,
-                                instances_path,
-                                transforms.Compose([
-                                    TransformWrapper(transforms.Resize((args.image_size, args.image_size))),
-                                    TransformWrapper(transforms.ToTensor()),
-                                    # normalize, # no need, toTensor does normalization
-                                ]))
-
-    # Create a subset of 2000 random indices first here, and then use split_dataset_gpu method to further split it as needed
-    # rng = np.random.default_rng(123)
-    # rand_idx = rng.choice(len(val_dataset), 2000)
-    loaded_dict = dict(np.load("/home/djacob/multi-label-patchcleanser/scripts/runtime_exps/rand_idx.npz"))
+    # Use a subset of 2000 random indices here (make sure it corresponds to the correct dataset)
+    loaded_dict = dict(np.load("/home/djacob/multi-label-patchcleanser/scripts/runtime_exps/mscoco_rand_idx.npz"))
     random_subset = torch.utils.data.Subset(val_dataset, loaded_dict["rand_idx"])
 
-    # Create GPU specific dataset
+    # Create GPU specific dataset - use a batch size of 1 in order to have the most straightforward per-sample time measurement
+    args.batch_size = 1
     gpu_val_dataset, start_idx, end_idx = split_dataset_gpu(random_subset, args.batch_size, args.total_num_gpu, world_gpu_id)
     file_print(args.logging_file, "listing out info about this GPU process...")
     file_print(args.logging_file, f"length of gpu_val_dataset: {len(gpu_val_dataset)}\nbatch is currently at: {(int)(start_idx / args.batch_size)}\nstart_idx: {start_idx}\nend_idx: {end_idx}")
 
-    # NOTE: SHUFFLE IS CURRENTLY SET TO INACTIVE -> here, pick a random set of 2000 datapoints. We can save the image indices somehwere if needed. No need for shuffling the data loader. 
     val_loader = torch.utils.data.DataLoader(
         gpu_val_dataset, batch_size=args.batch_size, shuffle=False,
         num_workers=args.workers, pin_memory=True)
 
-    # Create R-covering set of masks for both the first and second rounds
+    # Create R-covering set of masks, which are security params for the single-label CDPA PatchCleanser
     im_size = [args.image_size, args.image_size]
     patch_size = [args.patch_size, args.patch_size]
-    mask_number_fr = [args.mask_number_fr, args.mask_number_fr]
-    mask_list_fr, mask_size_fr, mask_stride_fr = gen_mask_set(im_size, patch_size, mask_number_fr) if args.patchcleanser else (None, None, None)
+    mask_number = [args.mask_number, args.mask_number]
+    mask_list, mask_size, mask_stride = gen_mask_set(im_size, patch_size, mask_number) if args.defense else (None, None, None)
 
-    validate_multi(model, val_loader, classes_list, args, mask_list_fr)
+    pd_infer_runtime(model, val_loader, args, mask_list)
 
-def predict(model, im, target, criterion, model_config):
-    rank = model_config.rank
-    thre = model_config.thre
-    Sig = torch.nn.Sigmoid()
+def pd_infer_runtime(model, val_loader, args, mask_list = None):
+    file_print(args.logging_file, "starting inference timing...")
 
-    # Compute output
-    with torch.no_grad():
-        output = model(im)
-        output_regular = Sig(output).cpu()
-
-    # Compute loss and predictions
-    loss = criterion(output.to(rank), target.to(rank))  # sigmoid will be done in loss !
-    pred = output_regular.detach().gt(thre).long()
-
-    return pred, loss.item()
-
-def validate_multi(model, val_loader, classes_list, args, mask_list_fr = None):
-    file_print(args.logging_file, "starting actual validation...")
-
-    preds = []
-    targets = []
-    num_classes = len(classes_list)
+    num_classes = args.num_classes
 
     metrics = PerformanceMetrics(num_classes)
-    model_config = ModelConfig(num_classes, args.rank, args.thre)
+    model_config = ModelConfig(num_classes, args.thre)
     criterion = AsymmetricLoss(gamma_neg=4, gamma_pos=0, clip=0.05, disable_torch_grad_focal_loss=True)
     total_loss = 0.0
 
@@ -249,25 +128,31 @@ def validate_multi(model, val_loader, classes_list, args, mask_list_fr = None):
         target = batch[1]
 
         # torch.max returns (values, indices), additionally squeezes along the dimension dim
-        target = target.max(dim=1)[0]
-        im = input_data.to(args.rank)
+        if args.dataset_name == "mscoco":
+            target = target.max(dim=1)[0]
+        im = input_data.cuda()
 
-        # Compute output - assume we have a batch size of 1 in order to have the most straightforward per-sample time measurement
+        # Compute output corresponding to the first class (i.e., vanilla PatchCleanser)
         t1_first_class = 0
         t2_first_class = 0
-        if mask_list_fr:
+        if mask_list:
             t1_first_class = time.process_time()
-            first_class_pred = double_masking_indiv_class(im, mask_list_fr, num_classes, model, model_config)
+            first_class_pred = pc_infer_firstclass(im, mask_list, num_classes, model, model_config)
             t2_first_class = time.process_time()
 
+        # Use PatchDEMUX to compute the output for all classes - use PatchCleanser as a backbone if the flag is enabled
         t1 = time.process_time()
-        pred, loss = (double_masking(im, mask_list_fr, num_classes, model, model_config), np.nan) if mask_list_fr else predict(model, im, target, criterion, model_config)
+        if mask_list is not None:
+            pred = pc_infer_doublemasking(im, mask_list, num_classes, model, model_config)
+            loss = np.nan  # Loss is not defined in the defended setting
+        else:
+            pred, loss = predict(model, im, target, criterion, model_config)
         t2 = time.process_time()
 
         # The ASL loss in each batch is NOT the average of losses from each image - rather, it is the sum
         total_loss += loss
 
-        if mask_list_fr:
+        if mask_list:
             assert(first_class_pred.item() == pred[0][0].item())
         
         # Compute TP, TN, FN, FP
@@ -281,18 +166,18 @@ def validate_multi(model, val_loader, classes_list, args, mask_list_fr = None):
         precision_o, recall_o = metrics.overallPrecision(), metrics.overallRecall()
         precision_c, recall_c = metrics.averageClassPrecision(), metrics.averageClassRecall()
 
-        # Runtime averaging
         file_print(args.logging_file, f'Batch: [{batch_index}/{len(val_loader)}]')
         file_print(args.logging_file, f'P_O {precision_o:.2f} R_O {recall_o:.2f} P_C {precision_c:.2f} R_C {recall_c:.2f} loss {f"{loss:.2f}" if not np.isnan(loss) else "Not Applicable"}\n')
 
+        # Runtime averaging
         indiv_class_runtime_arr.append(t2_first_class - t1_first_class)
         runtime_arr.append(t2 - t1)
         
-    ### END OF TIMING EXPERIMENTS ###
+    # Save timing information
     with open(args.save_dir + f"runtime.txt", "w") as f:
         f.write("Time elapsed\n")
         for i in range(len(runtime_arr)):
-            f.write(f"image idx {i}: single label -> {indiv_class_runtime_arr[i]} seconds, multi label -> {runtime_arr[i]} seconds\n")
+            f.write(f"image idx {i}: single label defense -> {indiv_class_runtime_arr[i]} seconds, multi label defense -> {runtime_arr[i]} seconds\n")
         f.write(f"===Average out of {len(runtime_arr)} samples: single label -> {np.mean(indiv_class_runtime_arr)} seconds, multi label -> {np.mean(runtime_arr)} seconds===")
 
     np.savez(args.save_dir + f"runtime_array", indiv_class_runtime_arr=indiv_class_runtime_arr, runtime_arr=runtime_arr)

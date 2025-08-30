@@ -1,6 +1,15 @@
 #!/bin/bash
 
-#SBATCH --job-name=validate_multilabel_patchcleanser_6mask_and_12mask
+# Inference Runtime Script
+# 
+# This script checks the runtime of PatchDEMUX.  
+#
+# Features:
+# - Compares PatchDEMUX inference runtime (i.e., multi-label setting) to vanilla PatchCleanser (i.e., single-label setting)
+#
+# Usage: sbatch runtime.slurm
+
+#SBATCH --job-name=runtime_patchdemux
 #SBATCH --output=slurm-%A.%a.out # stdout file
 #SBATCH --error=slurm-%A.%a.err  # stderr file
 
@@ -15,7 +24,7 @@
 #SBATCH --mail-type=fail         # send email if job fails
 #SBATCH --mail-user=djacob@princeton.edu
 
-# Start the conda environment
+# Start the conda environment - run some checks on the size of minority_pred_entries when running the single label PC alg
 module purge
 module load anaconda3/2022.10
 source activate torch-env
@@ -23,51 +32,94 @@ source activate torch-env
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
 
 # Model parameters
-PATCH_CLEANSER="--patchcleanser"
 ARCH="ViT"
 
-IMAGE_SIZE=384
-BATCH_SIZE=1
-PATCH_SIZE=55
-THRE=0.8
+if [[ "$ARCH" == "ViT" ]]; then
+    IMAGE_SIZE=384
+    PATCH_SIZE=55
+elif [[ "$ARCH" == "resnet" ]]; then
+    IMAGE_SIZE=448
+    PATCH_SIZE=64
+fi
 
-#mask 6 run
-MASK_NUMBER_FR=6
-MASK_NUMBER_SR=6
+MASK_NUMBER=4
+
+# Dataset info
+DATASET_NAME="mscoco"
+
+if [[ "$DATASET_NAME" == "mscoco" ]]; then
+    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+    NUM_CLASSES=80
+elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
+    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/pascalvoc/transformer/config_new.json"
+    NUM_CLASSES=20
+fi
 
 # GPU info
 WORLD_GPU_ID=$SLURM_ARRAY_TASK_ID
 TOTAL_NUM_GPU=4
 
 # Misc.
-TRIAL=2
+TRIAL=1
 
 # Trained model specifics
-PRETRAINED="true"
+DEF_FINETUNE="true" 
 
-if [[ "$PRETRAINED" == "true" ]]; then
+if [[ "$DEF_FINETUNE" == "true" ]]; then
     EPOCH=0
     CUTOUT_TYPE="greedycutout"
     CUTOUT_INFO="patch_55_masknum_6"
     TRAIN_INFO="training_onecyclelr_mixedprec_ema"
 
     TRIAL_TYPE="${CUTOUT_TYPE}_${CUTOUT_INFO}_${TRAIN_INFO}_epoch${EPOCH}"
-elif [[ "$PRETRAINED" == "false" ]]; then
+elif [[ "$DEF_FINETUNE" == "false" ]]; then
     TRIAL_TYPE="vanilla"
 fi
 
-# File/path locations
-DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
+# Model weight locations - paths should correspond to valid checkpoints for the desired dataset
+if [[ "$ARCH" == "ViT" ]]; then
+    # ViT weights
+    MODEL_NAME="Q2L-CvT_w24-384"
 
-# ViT weights
-MODEL_NAME="Q2L-CvT_w24-384"
+    if [[ "$DEF_FINETUNE" == "true" ]]; then
+        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-31-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
+    elif [[ "$DEF_FINETUNE" == "false" ]]; then
+        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
+    fi
+    
+elif [[ "$ARCH" == "resnet" ]]; then
+    # ResNet weights
+    MODEL_NAME="tresnet_l"
 
-if [[ "$PRETRAINED" == "true" ]]; then
-    MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-31-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
-elif [[ "$PRETRAINED" == "false" ]]; then
-    MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
+    if [[ "$DEF_FINETUNE" == "true" ]]; then
+        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/resnet_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-15-2024/trial_1/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
+    elif [[ "$DEF_FINETUNE" == "false" ]]; then
+        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
+    fi
+
 fi
 
-CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+# Type of run
+RUN_TYPE="defended"
+THRE=0.8
 
-python ml_pc_clean_images_ViT_RUNTIME.py $DATA_DIR --patchcleanser $PATCH_CLEANSER --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH --config $CONFIG --thre $THRE --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER_FR --mask-number-sr $MASK_NUMBER_SR --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE
+if [[ "$RUN_TYPE" == "defended" ]]; then
+    DEFENSE_STATUS="--defense"
+elif [[ "$RUN_TYPE" == "undefended" ]]; then
+    DEFENSE_STATUS="--no-defense"
+fi
+
+# Build the python command with conditional config parameter
+PYTHON_CMD="python performance/inference_runtime.py $DATA_DIR --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
+
+# Add config parameter only for ViT models
+if [[ "$ARCH" == "ViT" ]]; then
+    PYTHON_CMD="$PYTHON_CMD --config $CONFIG"
+fi
+
+PYTHON_CMD="$PYTHON_CMD --thre $THRE $DEFENSE_STATUS --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE"
+
+# Execute the command
+$PYTHON_CMD

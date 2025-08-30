@@ -53,9 +53,11 @@ DATASET_NAME="mscoco"
 
 if [[ "$DATASET_NAME" == "mscoco" ]]; then
     DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
     NUM_CLASSES=80
 elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
     DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/pascalvoc/transformer/config_new.json"
     NUM_CLASSES=20
 fi
 
@@ -65,15 +67,14 @@ TOTAL_NUM_GPU=8
 
 # Misc.
 TRIAL=1
-CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
 
 # Trained model specifics
-DEF_FINETUNE="true" 
+DEF_FINETUNE="false" 
 
 if [[ "$DEF_FINETUNE" == "true" ]]; then
     EPOCH=0
     CUTOUT_TYPE="greedycutout"
-    CUTOUT_INFO="patch_55_masknum_6"
+    CUTOUT_INFO="patch_64_masknum_6"
     TRAIN_INFO="training_onecyclelr_mixedprec_ema"
 
     TRIAL_TYPE="${CUTOUT_TYPE}_${CUTOUT_INFO}_${TRAIN_INFO}_epoch${EPOCH}"
@@ -117,15 +118,15 @@ fi
 for THRE in ${THRE_ARR[@]};
 do
     # Build the python command with conditional config parameter
-    PYTHON_CMD="python inference/pd_infer.py $DATA_DIR --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
-    
+    PYTHON_CMD="python inference/pd_infer.py $DATA_DIR --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
+
     # Add config parameter only for ViT models
     if [[ "$ARCH" == "ViT" ]]; then
         PYTHON_CMD="$PYTHON_CMD --config $CONFIG"
     fi
-    
+
     PYTHON_CMD="$PYTHON_CMD --thre $THRE $DEFENSE_STATUS --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE"
-    
+
     # Execute the command
     $PYTHON_CMD
 done

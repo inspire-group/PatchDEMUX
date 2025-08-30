@@ -12,9 +12,16 @@ from natsort import natsorted, ns
 from datetime import date
 todaystring = date.today().strftime("%m-%d-%Y")
 
+# Add parent directory to path so we can import from utils
+import sys
+import os
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
 from defenses.patchcleanser.pc_utils import gen_mask_set
 from defenses.patchcleanser.pc_certify import pc_certify_cached
 from utils.metrics import PerformanceMetrics
+from utils.common import file_print
 
 parser = argparse.ArgumentParser(description='PatchDEMUX certification with cached outputs')
 
@@ -34,10 +41,6 @@ parser.add_argument('--mask-number', default=6, type=int, help='mask number (def
 
 # Miscellaneous
 parser.add_argument('--trial-type', default="vanilla", type=str, help='type of checkpoints used with the trial (default: vanilla/unmodified)')
-
-def file_print(file_path, msg):
-    with open(file_path, "a") as f:
-        print(msg, flush=True, file=f) 
 
 def main():
     args = parser.parse_args()

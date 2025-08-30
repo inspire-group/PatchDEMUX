@@ -4,18 +4,8 @@
 # Assumes that recall monotonically decreases as threshold increases
 
 import argparse
-import time
 import numpy as np
 import torch
-import torch.nn.parallel
-import torch.distributed as dist
-import torch.multiprocessing as mp
-import torch.optim
-import torch.utils.data.distributed
-import torchvision.transforms as transforms
-import os
-import json
-from collections import OrderedDict
 from dataclasses import dataclass
 
 from pathlib import Path
@@ -24,14 +14,21 @@ from natsort import natsorted, ns
 from datetime import date
 todaystring = date.today().strftime("%m-%d-%Y")
 
-from utils.defense import gen_mask_set, double_masking_cache, ModelConfig
-from utils.metrics import PerformanceMetrics
-
+# Add parent directory to path so we can import from utils
 import sys
-sys.path.append("packages/ASL/")
+import os
+parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, parent_dir)
+
+from defenses.patchcleanser.pc_utils import gen_mask_set
+from defenses.patchcleanser.pc_infer import pc_infer_doublemasking_cached
+from utils.metrics import PerformanceMetrics
+from utils.common import file_print, ModelConfig
+
+sys.path.append(os.path.join(parent_dir, "packages/ASL/"))
 from packages.ASL.src.loss_functions.losses import AsymmetricLoss
 
-parser = argparse.ArgumentParser(description='Multi-Label PatchCleanser Certification')
+parser = argparse.ArgumentParser(description='PatchDEMUX inference with cached outputs; interpolation')
 
 # Dataset specifics
 parser.add_argument('--cache-location', help='path to cached output values')
@@ -50,39 +47,33 @@ parser.add_argument('--tolerance', default=0.5, type=float, help='specify how cl
 parser.add_argument('--max-interpolation-steps', default=15, type=int, help='number of interpolation steps until termination')
 
 # Mask set specifics
-parser.add_argument('--patchcleanser', action='store_true', help='enable PatchCleanser algorithm for inference; to disable, run --no-patchcleanser as the arg')
-parser.add_argument('--no-patchcleanser', dest='patchcleanser', action='store_false', help='disable PatchCleanser algorithm for inference; to enable, run --patchcleanser as the arg')
-parser.set_defaults(patchcleanser=True)
+parser.add_argument('--defense', action='store_true', help='enable PatchDEMUX algorithm for inference; to disable, run --no-defense as the arg')
+parser.add_argument('--no-defense', dest='defense', action='store_false', help='run inference on an undefended model; to enable, run --defense as the arg')
+parser.set_defaults(defense=True)
 parser.add_argument('--patch-size', default=64, type=int, help='patch size (default: 64)')
-parser.add_argument('--mask-number-fr', default=6, type=int, help='mask number first round (default: 6)')
-parser.add_argument('--mask-number-sr', default=6, type=int, help='mask number second round (default: 6)')
+parser.add_argument('--mask-number', default=6, type=int, help='mask number (default: 6)')
 
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
-
-def file_print(file_path, msg):
-    with open(file_path, "a") as f:
-        print(msg, flush=True, file=f) 
 
 def main():
     args = parser.parse_args()
     args.rank = 0
 
     # Create directory for logging
-    args.save_dir = str(Path(args.cache_location).parent/"interpolated_vals"/f"{'defended' if args.patchcleanser else 'undefended'}"/f"target_recall_{(args.target_recall):g}percent"/f"trial_{args.trial}") + "/"
+    args.save_dir = str(Path(args.cache_location).parent/"interpolated_vals"/f"{'defended' if args.defense else 'undefended'}"/f"target_recall_{(args.target_recall):g}percent"/f"trial_{args.trial}") + "/"
     Path(args.save_dir).mkdir(parents=True, exist_ok=True)
     args.logging_file = args.save_dir + "logging.txt"
 
-    # Create R-covering set of masks for both the first and second rounds
+    # Create R-covering set of masks, which are security params for the single-label CDPA PatchCleanser
     im_size = [args.image_size, args.image_size]
     patch_size = [args.patch_size, args.patch_size]
-    mask_number_fr = [args.mask_number_fr, args.mask_number_fr]
-    mask_list_fr, mask_size_fr, mask_stride_fr = gen_mask_set(im_size, patch_size, mask_number_fr) if args.patchcleanser else (None, None, None)
+    mask_number = [args.mask_number, args.mask_number]
+    mask_list, mask_size, mask_stride = gen_mask_set(im_size, patch_size, mask_number) if args.defense else (None, None, None)
 
-    validate_cache(mask_list_fr, args)
+    pd_infer_cached_interpolate(mask_list, args)
 
-def predict_cache(clean_output, target, criterion, model_config):
-    rank = model_config.rank
+def predict_cached(clean_output, target, criterion, model_config):
     thre = model_config.thre
 
     # sigmoid will be done in loss, therefore apply the logit function here to undo the sigmoid from caching
@@ -94,7 +85,7 @@ def predict_cache(clean_output, target, criterion, model_config):
 
     return torch.Tensor(pred), loss.item()
 
-def validate_cache(mask_list_fr, args):
+def pd_infer_cached_interpolate(mask_list, args):
     file_print(args.logging_file, "starting validation...")
 
     # Find all .npz files corresponding to the cached outputs
@@ -104,6 +95,8 @@ def validate_cache(mask_list_fr, args):
     class ThresholdResults:
         thre: float
         recall: float
+
+    num_classes = args.num_classes
 
     criterion = AsymmetricLoss(gamma_neg=4, gamma_pos=0, clip=0.05, disable_torch_grad_focal_loss=True)
 
@@ -139,12 +132,8 @@ def validate_cache(mask_list_fr, args):
         file_print(args.logging_file, f'Testing threshold: {test_thre:0.10f}')
 
         # Initialize variables for validation
-        preds = []
-        targets = []
-        num_classes = args.num_classes
-
         metrics = PerformanceMetrics(num_classes)
-        model_config = ModelConfig(num_classes, args.rank, test_thre)
+        model_config = ModelConfig(num_classes, test_thre)
         
         total_loss = 0.0
         dataset_len = 0
@@ -152,7 +141,6 @@ def validate_cache(mask_list_fr, args):
         # Run cache evaluation for the given threshold
         # target shape: [batch_size, object_size_channels, number_classes]
         for batch_index, cached_file in enumerate(cached_list):
-            
             if batch_index % 200 == 0:
                 file_print(args.logging_file, f'Batch: [{batch_index}/{len(cached_list)}]')
 
@@ -162,10 +150,12 @@ def validate_cache(mask_list_fr, args):
                 clean_output = output_dict["clean_output"]
                 masked_output = output_dict["masked_output"]
 
-            all_preds = (masked_output > test_thre).astype(int)
-
-            # Compute output
-            pred, loss = (double_masking_cache(all_preds, mask_list_fr, num_classes, model_config), np.nan) if mask_list_fr else predict_cache(clean_output, target, criterion, model_config)
+            # Call single-label CDPA PatchCleanser inference if the flag is enabled
+            if mask_list is not None:
+                pred = pc_infer_doublemasking_cached(masked_output, mask_list, num_classes, model_config)
+                loss = np.nan  # Loss is not defined in the defended setting
+            else:
+                pred, loss = predict_cached(clean_output, target, criterion, model_config)
 
             # The ASL loss in each batch is NOT the average of losses from each image - rather, it is the sum
             total_loss += loss
@@ -177,10 +167,9 @@ def validate_cache(mask_list_fr, args):
             fn = (pred - target).eq(-1).cpu().numpy().astype(int)
             fp = (pred - target).eq(1).cpu().numpy().astype(int)
 
-            # Compute precision and recall
+            # Compute recall
             metrics.updateMetrics(TP=tp, TN=tn, FN=fn, FP=fp)
-            precision_o, recall_o = metrics.overallPrecision(), metrics.overallRecall()
-            precision_c, recall_c = metrics.averageClassPrecision(), metrics.averageClassRecall()
+            recall_o = metrics.overallRecall()
 
         # Compute average loss per image sample
         average_loss = total_loss / dataset_len
@@ -196,7 +185,7 @@ def validate_cache(mask_list_fr, args):
             overest_path = args.save_dir + f"overestimated_thre_{test_thre * 100:0.10g}/"
             Path(overest_path).mkdir(parents=True, exist_ok=True)
             saveMetrics(overest_path, metrics, average_loss)
-            file_print(args.logging_file, f'FOUND OVERESTIMATED VALUE!!!\n')
+            file_print(args.logging_file, f'FOUND OVERESTIMATED VALUE!\n')
 
             overestimated = True
 
@@ -204,7 +193,7 @@ def validate_cache(mask_list_fr, args):
             underest_path = args.save_dir + f"underestimated_thre_{test_thre * 100:0.10g}/"
             Path(underest_path).mkdir(parents=True, exist_ok=True)
             saveMetrics(underest_path, metrics, average_loss)
-            file_print(args.logging_file, f'FOUND UNDERESTIMATED VALUE!!!\n')
+            file_print(args.logging_file, f'FOUND UNDERESTIMATED VALUE!\n')
 
             underestimated = True
 

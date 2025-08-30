@@ -9,7 +9,7 @@
 # - Caches model outputs relevant to certification, inference, and clean settings. 
 #
 # Prerequisites: Requires ~50GB of disk space.
-# Usage: sbatch cache.slurm
+# Usage: sbatch cache_generation.slurm
 
 #SBATCH --job-name=cache_outputs_patchdemux
 #SBATCH --output=slurm-%A.%a.out # stdout file
@@ -54,9 +54,11 @@ DATASET_NAME="mscoco"
 
 if [[ "$DATASET_NAME" == "mscoco" ]]; then
     DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
     NUM_CLASSES=80
 elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
     DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/pascalvoc/transformer/config_new.json"
     NUM_CLASSES=20
 fi
 
@@ -66,7 +68,6 @@ TOTAL_NUM_GPU=16
 
 # Misc.
 TRIAL=1
-CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
 CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
 
 # Trained model specifics
@@ -107,7 +108,7 @@ elif [[ "$ARCH" == "resnet" ]]; then
 fi
 
 # Build the python command with conditional config parameter
-PYTHON_CMD="python preprocessing/generate_cached_outputs.py $DATA_DIR --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
+PYTHON_CMD="python preprocessing/generate_cached_outputs.py $DATA_DIR --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
 
 # Add config parameter only for ViT models
 if [[ "$ARCH" == "ViT" ]]; then

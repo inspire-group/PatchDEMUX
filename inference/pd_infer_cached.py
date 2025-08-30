@@ -19,7 +19,7 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from defenses.patchcleanser.pc_utils import gen_mask_set
-from utils.defense import double_masking_cache
+from defenses.patchcleanser.pc_infer import pc_infer_doublemasking_cached
 from utils.metrics import PerformanceMetrics
 from utils.common import file_print, ModelConfig
 
@@ -102,7 +102,7 @@ def pd_infer_cached(args, mask_list=None):
 
         # Call single-label CDPA PatchCleanser inference if the flag is enabled
         if mask_list is not None:
-            pred = double_masking_cache(masked_output, mask_list, num_classes, model_config)
+            pred = pc_infer_doublemasking_cached(masked_output, mask_list, num_classes, model_config)
             loss = np.nan  # Loss is not defined in the defended setting
         else:
             pred, loss = predict_cached(clean_output, target, criterion, model_config)

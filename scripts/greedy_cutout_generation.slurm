@@ -1,6 +1,18 @@
 #!/bin/bash
 
-#SBATCH --job-name=train_cutout_multilabel_patchcleanser
+# Greedy Cutout Script
+# 
+# This script generates greedy cutout masks for a multi-label classifier using the method in https://arxiv.org/abs/2306.12610.
+# Greedy cutout is a defense fine-tuning technique that was designed specifically to improve the robustness of
+# the single-label CDPA PatchCleanser. We extend it here to the multi-classification domain to improve the
+# robustness of PatchDEMUX. 
+#
+# Features:
+# - Can be configured to run different architectures (i.e., Resnet, ViT)
+#
+# Usage: sbatch greedy_cutout_generation.slurm
+
+#SBATCH --job-name=greedy_cutout_generation
 #SBATCH --output=slurm-%A.%a.out # stdout file
 #SBATCH --error=slurm-%A.%a.err  # stderr file
 
@@ -35,8 +47,20 @@ elif [[ "$ARCH" == "resnet" ]]; then
     PATCH_SIZE=64
 fi
 
-MASK_NUMBER_FR=3
-MASK_NUMBER_SR=3
+MASK_NUMBER=6
+
+# Dataset info
+DATASET_NAME="mscoco"
+
+if [[ "$DATASET_NAME" == "mscoco" ]]; then
+    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+    NUM_CLASSES=80
+elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
+    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
+    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/pascalvoc/transformer/config_new.json"
+    NUM_CLASSES=20
+fi
 
 # GPU info
 WORLD_GPU_ID=0
@@ -46,20 +70,26 @@ TOTAL_NUM_GPU=1
 TRIAL=2
 TRIAL_TYPE="vanilla"
 
-# File/path locations
-DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
-
-# Model weight locations
+# Model weight locations - paths should correspond to valid checkpoints for the desired dataset
 if [[ "$ARCH" == "ViT" ]]; then
-    # ViT weights
+    # ViT weights - use vanilla checkpoints for greedy cutout generation
     MODEL_NAME="Q2L-CvT_w24-384"
     MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
 elif [[ "$ARCH" == "resnet" ]]; then
-    # ResNet weights
+    # ResNet weights - use vanilla checkpoints for greedy cutout generation
     MODEL_NAME="tresnet_l"
     MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
 fi
 
-CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+# Build the python command with conditional config parameter
+PYTHON_CMD="python preprocessing/generate_greedy_cutouts.py $DATA_DIR --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-path $MODEL_PATH --model-name $MODEL_NAME"
 
-python ml_greedy_cutout_generation.py $DATA_DIR --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-path $MODEL_PATH --model-name $MODEL_NAME --config $CONFIG --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER_FR --mask-number-sr $MASK_NUMBER_SR --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE
+# Add config parameter only for ViT models
+if [[ "$ARCH" == "ViT" ]]; then
+    PYTHON_CMD="$PYTHON_CMD --config $CONFIG"
+fi
+
+PYTHON_CMD="$PYTHON_CMD --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE"
+
+# Execute the command
+$PYTHON_CMD

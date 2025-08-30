@@ -109,6 +109,8 @@ class VOCDetection(datasets.VOCDetection):
         for name in object_names:
             target[self.class_names.index(name)] = 1
         
+        # NOTE: The PASCALVOC dataset does not currently support greedy cutout augmentation. 
+        # If you would like to use it, please edit the following line to be similar to the COCO dataset class. 
         if self.transform is not None:
             img = self.transform(img)
         return img, target

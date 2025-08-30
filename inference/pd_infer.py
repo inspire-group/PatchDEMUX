@@ -17,10 +17,10 @@ parent_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, parent_dir)
 
 from defenses.patchcleanser.pc_utils import gen_mask_set
-from utils.defense import double_masking
+from defenses.patchcleanser.pc_infer import pc_infer_doublemasking
 from utils.metrics import PerformanceMetrics
 from utils.datasets import split_dataset_gpu
-from utils.common import file_print, load_model, load_eval_dataset, ModelConfig
+from utils.common import file_print, load_model, load_eval_dataset, ModelConfig, predict
 
 sys.path.append(os.path.join(parent_dir, "packages/ASL/"))
 from packages.ASL.src.loss_functions.losses import AsymmetricLoss
@@ -30,7 +30,7 @@ parser = argparse.ArgumentParser(description='PatchDEMUX inference')
 # Dataset specifics
 parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--dataset-name', choices=["mscoco", "pascalvoc"], default="mscoco")
-parser.add_argument('--num-classes', default=80)
+parser.add_argument('--num-classes', default=80, type=int, help='number of classes (default: 80)')
 parser.add_argument('--image-size', default=448, type=int, help='input image size (default: 448)')
 parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
                     help='number of data loading workers (default: 2)')
@@ -50,7 +50,7 @@ parser.add_argument('--config', type=str, default=None, help='config file contai
 # Defense specifics
 parser.add_argument('--defense', action='store_true', help='enable PatchDEMUX algorithm for inference; to disable, run --no-defense as the arg')
 parser.add_argument('--no-defense', dest='defense', action='store_false', help='run inference on an undefended model; to enable, run --defense as the arg')
-parser.set_defaults(patchcleanser=True)
+parser.set_defaults(defense=True)
 parser.add_argument('--patch-size', default=64, type=int, help='patch size (default: 64)')
 parser.add_argument('--mask-number', default=6, type=int, help='mask number (default: 6)')
 
@@ -61,7 +61,6 @@ parser.add_argument('--total-num-gpu', default=1, type=int, help='total number o
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
 parser.add_argument('--trial-type', default="vanilla", type=str, help='type of checkpoints used with the trial (default: vanilla/unmodified)')
-
 
 def main():
     args = parser.parse_args()
@@ -101,24 +100,9 @@ def main():
     im_size = [args.image_size, args.image_size]
     patch_size = [args.patch_size, args.patch_size]
     mask_number = [args.mask_number, args.mask_number]
-    mask_list, mask_size, mask_stride = gen_mask_set(im_size, patch_size, mask_number) if args.patchcleanser else (None, None, None)
+    mask_list, mask_size, mask_stride = gen_mask_set(im_size, patch_size, mask_number) if args.defense else (None, None, None)
 
     pd_infer(model, val_loader, args, mask_list)
-
-def predict(model, im, target, criterion, model_config):
-    thre = model_config.thre
-    Sig = torch.nn.Sigmoid()
-
-    # Compute output
-    with torch.no_grad():
-        output = model(im)
-        output_regular = Sig(output).cpu()
-
-    # Compute loss and predictions
-    loss = criterion(output.cuda(), target.cuda())  # sigmoid will be done in loss !
-    pred = output_regular.detach().gt(thre).long()
-
-    return pred, loss.item()
 
 def pd_infer(model, val_loader, args, mask_list=None):
     file_print(args.logging_file, "starting inference...")
@@ -145,7 +129,7 @@ def pd_infer(model, val_loader, args, mask_list=None):
 
        # Call single-label CDPA PatchCleanser inference if the flag is enabled
         if mask_list is not None:
-            pred = double_masking(im, mask_list, num_classes, model, model_config)
+            pred = pc_infer_doublemasking(im, mask_list, num_classes, model, model_config)
             loss = np.nan  # Loss is not defined in the defended setting
         else:
             pred, loss = predict(model, im, target, criterion, model_config)

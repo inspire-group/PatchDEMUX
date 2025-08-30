@@ -28,7 +28,7 @@ parser = argparse.ArgumentParser(description='PatchDEMUX certification')
 # Dataset specifics
 parser.add_argument('data', metavar='DIR', help='path to dataset')
 parser.add_argument('--dataset-name', choices=["mscoco", "pascalvoc"], default="mscoco")
-parser.add_argument('--num-classes', default=80)
+parser.add_argument('--num-classes', default=80, type=int)
 parser.add_argument('--image-size', default=448, type=int, help='input image size (default: 448)')
 parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
                     help='number of data loading workers (default: 2)')

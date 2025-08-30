@@ -9,7 +9,7 @@ parser = argparse.ArgumentParser(description='Merge outputs from different data 
 
 # Data information
 parser.add_argument('--data-path', type=str, help='Path to directory containing data subset folders with metrics files')
-parser.add_argument('--num-classes', default=80, help='Number of classes in the dataset')
+parser.add_argument('--num-classes', default=80, type=int, help='Number of classes in the dataset')
 parser.add_argument('--data-filename', default='certified_metrics', help='Base filename for metrics files')
 
 def main():

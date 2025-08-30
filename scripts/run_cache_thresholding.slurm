@@ -33,7 +33,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib
 
 # Path locations and thresholds
 CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
-CACHED_OUTPUTS=${CACHE_DIR}/cached_outputs/mscoco/ViT/patch_55_masknum_6/08-30-2024/trial_2_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0
+CACHED_OUTPUTS=${CACHE_DIR}/cached_outputs/mscoco/ViT/patch_55_masknum_6/08-22-2025/trial_1_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
 
 THRE_ARR_STD=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99)
 THRE_ARR_LOW1=(0.00005 0.0001 0.0005 0.001 0.005)
@@ -65,7 +65,7 @@ elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
 fi
 
 # Type of run
-RUN_TYPE="undefended"
+RUN_TYPE="certification"
 
 if [[ "$RUN_TYPE" == "certification" ]]; then
     ATTACKER_TYPE="worst_case"

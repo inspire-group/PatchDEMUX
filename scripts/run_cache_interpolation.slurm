@@ -1,5 +1,16 @@
 #!/bin/bash
 
+# Cache Interpolation Script
+# 
+# This script interpolates between provided threshold values to achieve
+# some target recall value. 
+#
+# Features:
+# - Can be configured to run certification, defended clean, and undefended clean settings
+#
+# Prerequisites: Run cache generation script first to create cached outputs. Then run cache thresholding to compute a reasonable set of recall values that will aid interpolation. 
+# Usage: sbatch run_cache_interpolation.slurm
+
 #SBATCH --job-name=cache_interpolation
 #SBATCH --output=slurm-%A.%a.out # stdout file
 #SBATCH --error=slurm-%A.%a.err  # stderr file
@@ -20,71 +31,60 @@ source activate torch-env
 
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
 
-# File/path locations
-#CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/mscoco/ViT/patch_55_masknumfr_6_masknumsr_6/08-30-2024/trial_2_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
-CACHED_OUTPUTS=/scratch/gpfs/djacob/multi-label-patchcleanser/cached_outputs/pascalvoc/ViT/patch_55_masknumfr_6_masknumsr_6/03-21-2025/trial_1_vanilla/cached_outputs
+# Path locations and thresholds
+CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
+CACHED_OUTPUTS=${CACHE_DIR}/cached_outputs/mscoco/ViT/patch_55_masknum_6/08-22-2025/trial_1_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
 
-# Interpolation parameters
+# Interpolation parameters - for each element in the target recall array, add values below corresponding to recalls directly below and above the target
 #FIRST_THRE_ARR=()
 #FIRST_RECALL_ARR=()
 #SECOND_THRE_ARR=()
 #SECOND_RECALL_ARR=()
 
-#undefended
-FIRST_THRE_ARR=(0.999 0.999 0.96)
-FIRST_RECALL_ARR=(16.84 16.84 74.12)
-SECOND_THRE_ARR=(0.99 0.99 0.95)
-SECOND_RECALL_ARR=(53.29 53.29 76.81)
-
-# no hist
-#FIRST_THRE_ARR=(0.99 0.91 0.56)
-#FIRST_RECALL_ARR=(21.25 49.83 74.25)
-#SECOND_THRE_ARR=(0.98 0.90 0.54)
-#SECOND_RECALL_ARR=(30.18 51.35 75.18)
+# certification example
+#FIRST_THRE_ARR=(0.999 0.86 0.60)
+#FIRST_RECALL_ARR=(19.35 48.67 73.59)
+#SECOND_THRE_ARR=(0.99 0.84 0.58)
+#SECOND_RECALL_ARR=(30.9 50.61 75.43)
 
 TARGET_RECALL_ARR=(25.0 50.0 75.0)
 
 # Model parameters
 ARCH="ViT"
-DATASET_NAME="pascalvoc"
-NUM_CLASSES=20
 
 if [[ "$ARCH" == "ViT" ]]; then
     IMAGE_SIZE=384
     PATCH_SIZE=55
-    #PATCH_SIZE=218
 elif [[ "$ARCH" == "resnet" ]]; then
     IMAGE_SIZE=448
     PATCH_SIZE=64
-    #PATCH_SIZE=64
 fi
 
 MASK_NUMBER=6
+
+# Dataset info
+DATASET_NAME="mscoco"
+if [[ "$DATASET_NAME" == "mscoco" ]]; then
+    NUM_CLASSES=80
+elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
+    NUM_CLASSES=20
+fi
 
 # Misc.
 TRIAL=2
 
 # Type of run
-RUN_TYPE="undefended"
+RUN_TYPE="defended"
 HIST="no_hist"
-
-#RUN_TYPE="defended"
-#HIST="no_hist"
-
-#RUN_TYPE="certification"
-#HIST="no_hist"
-
-#RUN_TYPE="certification"
-#HIST="hist"
 
 if [ "$RUN_TYPE" == "certification" ] && [ "$HIST" == "no_hist" ]; then
     ATTACKER_TYPE="none"
 elif [ "$RUN_TYPE" == "certification" ] && [ "$HIST" == "hist" ]; then
     ATTACKER_TYPE="worst_case"
 elif [[ "$RUN_TYPE" == "defended" ]]; then
-    PATCH_CLEANSER="--patchcleanser"
+    DEFENSE_STATUS="--defense"
 elif [[ "$RUN_TYPE" == "undefended" ]]; then
-    PATCH_CLEANSER="--no-patchcleanser"
+    DEFENSE_STATUS="--no-defense"
 fi
 
 # Run interpolation
@@ -98,8 +98,8 @@ do
     TARGET_RECALL=${TARGET_RECALL_ARR[$i]}
 
     if [[ "$RUN_TYPE" == "certification" ]]; then
-        python ml_pc_cache_certification_interpolator.py --cache-location $CACHED_OUTPUTS --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --attacker-type $ATTACKER_TYPE --first-thre $FIRST_THRE --first-recall $FIRST_RECALL --second-thre $SECOND_THRE --second-recall $SECOND_RECALL --target-recall $TARGET_RECALL --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER --trial $TRIAL
+        python certify/pd_certify_cached_interpolate.py --cache-location $CACHED_OUTPUTS --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --attacker-type $ATTACKER_TYPE --first-thre $FIRST_THRE --first-recall $FIRST_RECALL --second-thre $SECOND_THRE --second-recall $SECOND_RECALL --target-recall $TARGET_RECALL --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER --trial $TRIAL
     else
-        python ml_pc_cache_clean_images_interpolator.py $PATCH_CLEANSER --cache-location $CACHED_OUTPUTS --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --first-thre $FIRST_THRE --first-recall $FIRST_RECALL --second-thre $SECOND_THRE --second-recall $SECOND_RECALL --target-recall $TARGET_RECALL --patch-size $PATCH_SIZE --mask-number-fr $MASK_NUMBER --trial $TRIAL
+        python inference/pd_infer_cached_interpolate.py $DEFENSE_STATUS --cache-location $CACHED_OUTPUTS --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --first-thre $FIRST_THRE --first-recall $FIRST_RECALL --second-thre $SECOND_THRE --second-recall $SECOND_RECALL --target-recall $TARGET_RECALL --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER --trial $TRIAL
     fi
 done
