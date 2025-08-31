@@ -3,7 +3,9 @@ By [Dennis Jacob](https://djapp18.github.io/), [Chong Xiang](http://xiangchong.x
 
 Code for "[PatchDEMUX: A Certifiably Robust Framework for Multi-label Classifiers Against Adversarial Patches](https://arxiv.org/abs/2505.24703)" in CVPR 2025. 
 
-<img src="./assets/patchdemux_inference.png" align="center" width="100%" alt="defense overview pipeline" >
+<div align="center">
+<img src="./assets/patchdemux_inference.png" width="100%" alt="defense overview pipeline" >
+</div>
 
 **Takeaways**: 
 
@@ -12,7 +14,9 @@ Code for "[PatchDEMUX: A Certifiably Robust Framework for Multi-label Classifier
 3. We additionally propose location-aware certification, a novel approach that can provide tighter robustness bounds when an attacker is limited to a single patch.
 4. We instantiate our defense framework with PatchCleanser, the current SOTA single-label defense, and achieve strong robust performance on MSCOCO and PASCALVOC. Precision-recall plots for unattacked MSCOCO images (left) and certified robustness on MSCOCO (right) are shown below. 
 
+<div align="center">
 <img src="./assets/vit_prec_recall_clean.png" width="45%" alt="clean performance" > <img src="./assets/vit_prec_recall_robust.png" width="45%" alt="robust performance" >
+</div>
 
 ## Requirements
 Experiments were done with PyTorch 2.1.0 with CUDA enabled. The remaining packages used in this work can be found in `environment.yml` (i.e., the conda environment associated with this work).
