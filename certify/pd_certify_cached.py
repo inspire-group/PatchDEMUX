@@ -64,7 +64,7 @@ def pd_certify_cached(mask_list, args):
     # Find all .npz files corresponding to the cached outputs
     cached_list = natsorted(glob.glob(f'{args.cache_location}/*.npz'), key=lambda y: y.lower())
 
-    # Initialize variables for certifiation
+    # Initialize variables for certification
     num_classes = args.num_classes
 
     metrics = PerformanceMetrics(num_classes)

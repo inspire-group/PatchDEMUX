@@ -102,7 +102,7 @@ def pc_infer_doublemasking(data, mask_list, num_classes, model, model_config):
             masked_im_class = minority_pred_entry[2]
             if sr_consensus_bool[masked_im_idx, masked_im_class]:
                 output_pred[minority_pred_entry[0], masked_im_class] = sr_all_preds[masked_im_idx, 0, masked_im_class]
-                minority_pred_entries = minority_pred_entries[np.logical_or(minority_pred_entries[:, 0] != minority_pred_entry[0], minority_pred_entries[:, 2] != masked_im_class)]    # Unwiring procedure to avoid unecessary second round masking
+                minority_pred_entries = minority_pred_entries[np.logical_or(minority_pred_entries[:, 0] != minority_pred_entry[0], minority_pred_entries[:, 2] != masked_im_class)]    # Unwiring procedure to avoid unnecessary second round masking
     
     # Set remaining outputs to be the first round majority value (relevant for case III)
     output_pred[output_pred == -1] = majority_pred[output_pred == -1]
@@ -176,7 +176,7 @@ def pc_infer_firstclass(data, mask_list, num_classes, model, model_config):
             masked_im_idx = np.where(minority_image_idx == minority_pred_entry[0])[0][0]    # Get reverse map of image index to the location within the minority_image_idx array
             if first_class_sr_consensus_bool[masked_im_idx]:
                 output_pred[minority_pred_entry[0]] = first_class_sr_preds[masked_im_idx, 0]
-                minority_pred_entries = minority_pred_entries[minority_pred_entries[:, 0] != minority_pred_entry[0]]    # Unwiring procedure to avoid unecessary second round masking
+                minority_pred_entries = minority_pred_entries[minority_pred_entries[:, 0] != minority_pred_entry[0]]    # Unwiring procedure to avoid unnecessary second round masking
     
     # Set remaining outputs to be the first round majority value (relevant for case III)
     majority_pred = majority_pred[:, np.newaxis]
@@ -271,7 +271,7 @@ def pc_infer_doublemasking_cached(cached_outputs, mask_list, num_classes, model_
             masked_im_class = minority_pred_entry[2]
             if sr_consensus_bool[masked_im_idx, masked_im_class]:
                 output_pred[minority_pred_entry[0], masked_im_class] = sr_all_preds[masked_im_idx, 0, masked_im_class]
-                minority_pred_entries = minority_pred_entries[np.logical_or(minority_pred_entries[:, 0] != minority_pred_entry[0], minority_pred_entries[:, 2] != masked_im_class)]    # Unwiring procedure to avoid unecessary second round masking
+                minority_pred_entries = minority_pred_entries[np.logical_or(minority_pred_entries[:, 0] != minority_pred_entry[0], minority_pred_entries[:, 2] != masked_im_class)]    # Unwiring procedure to avoid unnecessary second round masking
     
     # Set remaining outputs to be the first round majority value (relevant for case III)
     output_pred[output_pred == -1] = majority_pred[output_pred == -1]
