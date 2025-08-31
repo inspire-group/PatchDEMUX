@@ -1,4 +1,4 @@
-# Introdunction
+# Query2Label: A Simple Transformer Way to Multi-Label Classification
 Code for the paper ["Query2Label: A Simple Transformer Way to Multi-Label Classification"], a vision transformer for multi-label classification. For more details, visit the official repository at https://github.com/SlongLiu/query2labels. 
 
 # Citation
