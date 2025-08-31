@@ -1,65 +1,91 @@
 # PatchDEMUX: A Certifiably Robust Framework for Multi-label Classifiers Against Adversarial Patches
+By [Dennis Jacob](https://djapp18.github.io/), [Chong Xiang](http://xiangchong.xyz/), [Prateek Mittal](https://www.princeton.edu/~pmittal/)
 
-Coming soon...
+Code for "[PatchDEMUX: A Certifiably Robust Framework for Multi-label Classifiers Against Adversarial Patches](https://arxiv.org/abs/2505.24703)" in CVPR 2025. 
 
-## Directory Structure
+<img src="./assets/patchdemux_inference.pdf" align="center" width="100%" alt="defense overview pipeline" >
 
+**Takeaways**: 
+
+1. We address the challenge of patch attacks in multi-label classification via PatchDEMUX, a defense framework that can provably extend any existing/future single-label defense.
+2. Our framework provides *certifiable robustness*. Specifically, it provably guarantees lower bounds on performance (i.e., precision, recall) irrespective of the chosen patch attack.
+3. We additionally propose location-aware certification, a novel approach that can provide tighter robustness bounds when an attacker is limited to a single patch.
+4. We instantiate our defense framework with PatchCleanser, the current SOTA single-label defense, and achieve strong robust performance on MSCOCO and PASCALVOC. Precision-recall plots for unattacked MSCOCO images (left) and certified robustness on MSCOCO (right) are shown below. 
+
+<img src="./assets/vit_prec_recall_clean.pdf" width="45%" alt="clean performance" > <img src="./assets/vit_prec_recall_robust.pdf" width="45%" alt="robust performance" >
+
+## Requirements
+Experiments were done with PyTorch 2.1.0 with CUDA enabled. The remaining packages used in this work can be found in `environment.yml` (i.e., the conda environment associated with this work).
+
+A cluster of NVIDIA A100 40GB GPUs were used for evaluation. 
+
+## Files
+
+```shell
+patchdemux/
+├── certify/
+│   ├── pd_certify.py                     # Main certification script for PatchDEMUX
+│   ├── pd_certify_cached.py              # Cached certification using pre-computed outputs
+│   └── pd_certify_cached_interpolate.py  # Interpolated certification from cached outputs
+│
+├── defenses/                             # Single-label CDPA implementations
+│   └── patchcleanser/
+│       ├── pc_certify.py                 # PatchCleanser certification
+│       ├── pc_infer.py                   # PatchCleanser inference
+│       └── pc_utils.py                   # PatchCleanser utility functions
+│
+├── inference/
+│   ├── pd_infer.py                       # Main PatchDEMUX inference script
+│   ├── pd_infer_cached.py                # Cached inference using pre-computed outputs
+│   └── pd_infer_cached_interpolate.py    # Interpolated inference from cached outputs
+│
+├── performance/
+│   └── inference_runtime.py              # Runtime evaluation for inference
+│
+├── preprocessing/
+│   ├── generate_cached_outputs.py        # Caches model outputs, which can be used later when sweeping model thresholds
+│   └── generate_greedy_cutouts.py        # Generate greedy cutout masks
+│
+├── scripts/                              # SLURM job scripts for running experiments
+│
+├── train/
+│   ├── cutout_defense_finetuning.py      # Fine-tune models with cutout augmentation
+│   ├── pascalvoc_transfer_learning.py    # Transfer learning for PASCALVOC dataset
+│   └── train_utils.py                    # Training utility functions
+│
+├── utils/
+│   ├── common.py                         # Common utility functions
+│   ├── cutout_augmentations.py           # Cutout augmentation implementations
+│   ├── datasets.py                       # Dataset loading and preprocessing
+│   ├── metrics.py                        # Evaluation metrics
+│   ├── model_ema.py                      # Exponential moving average for models
+│   └── models.py                         # Model architectures and loading
+│
+├── environment.yml                       # Conda environment specification
+├── pd_metrics_merge.py                   # Script to merge evaluation metrics
+└── README.md                             # This file
 ```
-multi-label-patchcleanser/
-├── PatchCleanser/              # Original PatchCleanser implementation
-│   ├── assets/                 # Documentation images
-│   ├── checkpoints/            # Model checkpoints
-│   ├── data/                   # Dataset files (ImageNette)
-│   ├── dump/                   # Output dumps and predictions
-│   ├── misc/                   # Miscellaneous utilities
-│   ├── utils/                  # Core utilities (cutout, defense, setup)
-│   ├── pc_certification.py    # Certification script
-│   ├── pc_clean_acc.py        # Clean accuracy evaluation
-│   ├── train_model.py         # Model training
-│   └── vanilla_clean_acc.py   # Vanilla accuracy evaluation
-├── certify/                   # Certification modules
-├── defenses/                  # Defense implementations
-│   └── patchcleanser/         # PatchCleanser defense utilities
-├── inference/                 # Inference scripts
-├── preprocessing/             # Data preprocessing utilities
-├── performance/               # Performance evaluation
-├── train/                     # Training scripts for different datasets
-├── utils/                     # Shared utilities
-├── scripts/                   # SLURM job scripts
-│   ├── certify.slurm         # ViT certification jobs
-│   ├── certifyf.slurm        # ResNet/ViT certification jobs
-│   ├── cache.slurm           # Caching jobs
-│   ├── train_cutout.slurm    # Training with cutout augmentation
-│   └── pascal_voc/           # Pascal VOC specific scripts
-├── dump/                      # Output data and metrics
-└── runtime/                   # Runtime evaluation data
-```
-
-## Key Components
-
-- **Certification**: Scripts for certifying robustness against adversarial patches
-- **Defense**: PatchCleanser defense implementation for multi-label classification
-- **Training**: Model training with cutout augmentations and EMA
-- **Evaluation**: Clean accuracy and runtime performance evaluation
-- **Datasets**: Support for MS-COCO, Pascal VOC, and ImageNette
-
-## Scripts
-
-- `scripts/certify.slurm`: ViT model certification
-- `scripts/certifyf.slurm`: ResNet/ViT certification with residual robustness
-- `scripts/cache.slurm`: Generate cached outputs for faster evaluation
-- `scripts/train_cutout.slurm`: Train models with cutout augmentation
 
 ## Usage
+Evaluations are done using SLURM job scripts, which automatically populate the required arguments for the Python scripts. The SLURM parameters can be modified based on the desired experiment.
 
-The repository uses SLURM job scripts for running experiments on compute clusters. Key parameters include:
-- Patch size, mask numbers for first/second rounds
-- Batch size and GPU configuration
-- Model paths and dataset directories
-- Threshold values for certification
+A key feature of the project is the presence of a caching API and a non-caching API. Many of the experiments can take a while to run due to the nature of certification; we thus provide the ability to cache multi-label model outputs ahead of time, which can be used later when sweeping model thresholds for certification, inference, etc. This caching process is available when the single-label CDPA PatchCleanser is used as a backbone for PatchDEMUX. To generate cached model outputs, run preprocessing/generate_cached_outputs.py. Then, run any of the scripts within the repository which are suffixed with the word *cached*. Note that while both APIs have strong quantitative agreement, the raw outputs are not always the exact same, likely due to rounding errors. 
+
+If anything is unclear, feel free to contact Dennis Jacob (djacob18@berkeley.edu)!
 
 ## Models
-
 Supports both ResNet (TResNet-L) and Vision Transformer (Q2L-CvT) architectures for multi-label classification tasks.
 
-NOTE: We should mention here that the cached and non-cached APIs have general quantitative agreement, but the raw outputs are not always the exact same, likely due to rounding errors.
+## Citations
+If you find our work to be useful, please consider citing:
+
+```tex
+@inproceedings{Jacob_Xiang_Mittal_2025,
+    title={PatchDEMUX: A Certifiably Robust Framework for Multi-label Classifiers Against Adversarial Patches},
+    DOI={10.1109/CVPR52734.2025.00929},
+    booktitle={2025 IEEE/CVF Conference on Computer Vision and Pattern Recognition},
+    author={Jacob, Dennis and Xiang, Chong and Mittal, Prateek},
+    year={2025},
+    pages={9944–9953}
+}
+```
