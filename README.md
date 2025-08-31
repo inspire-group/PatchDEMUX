@@ -3,7 +3,7 @@ By [Dennis Jacob](https://djapp18.github.io/), [Chong Xiang](http://xiangchong.x
 
 Code for "[PatchDEMUX: A Certifiably Robust Framework for Multi-label Classifiers Against Adversarial Patches](https://arxiv.org/abs/2505.24703)" in CVPR 2025. 
 
-<img src="./assets/patchdemux_inference.pdf" align="center" width="100%" alt="defense overview pipeline" >
+<img src="./assets/patchdemux_inference.png" align="center" width="100%" alt="defense overview pipeline" >
 
 **Takeaways**: 
 
@@ -12,7 +12,7 @@ Code for "[PatchDEMUX: A Certifiably Robust Framework for Multi-label Classifier
 3. We additionally propose location-aware certification, a novel approach that can provide tighter robustness bounds when an attacker is limited to a single patch.
 4. We instantiate our defense framework with PatchCleanser, the current SOTA single-label defense, and achieve strong robust performance on MSCOCO and PASCALVOC. Precision-recall plots for unattacked MSCOCO images (left) and certified robustness on MSCOCO (right) are shown below. 
 
-<img src="./assets/vit_prec_recall_clean.pdf" width="45%" alt="clean performance" > <img src="./assets/vit_prec_recall_robust.pdf" width="45%" alt="robust performance" >
+<img src="./assets/vit_prec_recall_clean.png" width="45%" alt="clean performance" > <img src="./assets/vit_prec_recall_robust.png" width="45%" alt="robust performance" >
 
 ## Requirements
 Experiments were done with PyTorch 2.1.0 with CUDA enabled. The remaining packages used in this work can be found in `environment.yml` (i.e., the conda environment associated with this work).
@@ -69,7 +69,7 @@ patchdemux/
 ## Usage
 Evaluations are done using SLURM job scripts, which automatically populate the required arguments for the Python scripts. The SLURM parameters can be modified based on the desired experiment.
 
-A key feature of the project is the presence of a caching API and a non-caching API. Many experiments can take a while to run; we thus provide the option to cache multi-label model outputs ahead of time, which can be used later when sweeping model thresholds for certification, inference, etc. To generate cached model outputs, run preprocessing/generate_cached_outputs.py. Then, run any of the scripts within the repository suffixed with the word *cached*. Note that while both APIs have strong quantitative agreement, the raw outputs are not always the exact same, likely due to rounding errors. 
+A key feature of the project is the presence of a caching API and a non-caching API. Many experiments can take a while to run; we thus provide the option to cache multi-label model outputs ahead of time, which can be used later when sweeping model thresholds for certification, inference, etc. To generate cached model outputs, run `preprocessing/generate_cached_outputs.py`. Then, run any of the scripts within the repository suffixed with the word *cached*. Note that while both APIs have strong quantitative agreement, the raw outputs are not always the exact same, likely due to rounding errors. 
 
 If anything is unclear, feel free to contact Dennis Jacob (djacob18@berkeley.edu)!
 
