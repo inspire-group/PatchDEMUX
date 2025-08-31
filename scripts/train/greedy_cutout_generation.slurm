@@ -25,14 +25,17 @@
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
-#SBATCH --mail-user=djacob@princeton.edu
+#SBATCH --mail-user=YOUR_EMAIL_HERE
 
 # Start the conda environment
 module purge
 module load anaconda3/2022.10
 source activate torch-env
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.conda/envs/torch-env/lib 
+
+# Replace with your project path, e.g., "/scratch/gpfs/username/patchdemux"
+SCRATCH_DIR="YOUR_PATH_HERE"
 
 # Model parameters
 ARCH="ViT"
@@ -53,12 +56,12 @@ MASK_NUMBER=6
 DATASET_NAME="mscoco"
 
 if [[ "$DATASET_NAME" == "mscoco" ]]; then
-    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
-    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+    DATA_DIR="${SCRATCH_DIR}/coco/"
+    CONFIG="${SCRATCH_DIR}/checkpoints/mscoco/transformer/config_new.json"
     NUM_CLASSES=80
 elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
-    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
-    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/pascalvoc/transformer/config_new.json"
+    DATA_DIR="${SCRATCH_DIR}/pascal-voc/"
+    CONFIG="${SCRATCH_DIR}/checkpoints/pascalvoc/transformer/config_new.json"
     NUM_CLASSES=20
 fi
 
@@ -74,11 +77,11 @@ TRIAL_TYPE="vanilla"
 if [[ "$ARCH" == "ViT" ]]; then
     # ViT weights - use vanilla checkpoints for greedy cutout generation
     MODEL_NAME="Q2L-CvT_w24-384"
-    MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
+    MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/transformer/checkpoint.pkl"
 elif [[ "$ARCH" == "resnet" ]]; then
     # ResNet weights - use vanilla checkpoints for greedy cutout generation
     MODEL_NAME="tresnet_l"
-    MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
+    MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
 fi
 
 # Build the python command with conditional config parameter

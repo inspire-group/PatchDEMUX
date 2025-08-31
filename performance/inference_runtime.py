@@ -39,7 +39,7 @@ parser.add_argument('-j', '--workers', default=2, type=int, metavar='N',
 # Model specifics
 available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
 parser.add_argument('--model-name', choices=available_models, default='Q2L-CvT_w24-384')
-parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
+parser.add_argument('--model-path', type=str)
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
 
@@ -60,6 +60,7 @@ parser.add_argument('--total-num-gpu', default=1, type=int, help='total number o
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
 parser.add_argument('--trial-type', default="vanilla", type=str, help='type of checkpoints used with the trial (default: vanilla/unmodified)')
+parser.add_argument('--rand-idx-path', type=str, help='path to the random indices file (e.g., scripts/runtime_scripts/mscoco_rand_idx.npz)')
 
 
 def main():
@@ -89,7 +90,7 @@ def main():
     val_dataset = load_eval_dataset(args)
 
     # Use a subset of 2000 random indices here (make sure it corresponds to the correct dataset)
-    loaded_dict = dict(np.load("/home/djacob/multi-label-patchcleanser/scripts/runtime_exps/mscoco_rand_idx.npz"))
+    loaded_dict = dict(np.load(args.rand_idx_path))
     random_subset = torch.utils.data.Subset(val_dataset, loaded_dict["rand_idx"])
 
     # Create GPU specific dataset - use a batch size of 1 in order to have the most straightforward per-sample time measurement

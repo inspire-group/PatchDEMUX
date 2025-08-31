@@ -1,7 +1,8 @@
 # Adopted from: 
 # - https://github.com/Alibaba-MIIL/ASL/blob/main/validate.py
 # - https://github.com/SlongLiu/query2labels/blob/main/q2l_infer.py 
-# Assumes that recall monotonically decreases as threshold increases
+
+# NOTE: Assumes that recall monotonically decreases as threshold increases
 
 import argparse
 import numpy as np

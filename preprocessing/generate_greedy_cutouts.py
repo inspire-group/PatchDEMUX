@@ -39,7 +39,7 @@ parser.add_argument('-b', '--batch-size', default=32, type=int, help='mini-batch
 # Model specifics
 available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
 parser.add_argument('--model-name', choices=available_models, default='tresnet_l')
-parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
+parser.add_argument('--model-path', type=str)
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
 
 # * Transformer config file (optional, required for ViT models)
@@ -74,7 +74,7 @@ def main():
 
     # Construct file path for saving metrics
     args.metadata = f"patch_{args.patch_size}_masknum_{args.mask_number}"
-    foldername = f"dump/greedy_cutout/{args.dataset_name}/{args.metadata}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}/gpu_world_id_{args.world_gpu_id}/"
+    foldername = os.path.join(parent_dir, f"dump/greedy_cutout/{args.dataset_name}/{args.metadata}/{'ViT' if is_ViT else 'resnet'}/{todaystring}/trial_{args.trial}_{args.trial_type}/gpu_world_id_{args.world_gpu_id}/")
     Path(foldername).mkdir(parents=True, exist_ok=True)
     args.save_dir = foldername
     args.logging_file = foldername + "logging.txt"

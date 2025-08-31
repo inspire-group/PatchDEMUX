@@ -35,7 +35,7 @@ parser.add_argument('-b', '--batch-size', default=32, type=int, help='mini-batch
 # Model specifics
 available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
 parser.add_argument('--model-name', choices=available_models, default='tresnet_l')
-parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
+parser.add_argument('--model-path', type=str)
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
 
 # * Transformer config file (optional, required for ViT models)
@@ -53,7 +53,7 @@ parser.add_argument('--total-num-gpu', default=1, type=int, help='total number o
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
 parser.add_argument('--trial-type', default="vanilla", type=str, help='type of checkpoints used with the trial (default: vanilla/unmodified)')
 parser.add_argument('--print-freq', '-p', default=64, type=int, help='print frequency (default: 64)')
-parser.add_argument('--cache-dir', default='/scratch/gpfs/djacob/multi-label-patchcleanser', type=str, help='directory for cached outputs (default: /scratch/gpfs/djacob/multi-label-patchcleanser)')
+parser.add_argument('--cache-dir', type=str, help='directory for cached outputs')
 
 def main():
     args = parser.parse_args()

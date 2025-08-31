@@ -1,16 +1,16 @@
 #!/bin/bash
 
-# Inference Script
+# Certification Script
 # 
-# This script performs inference for PatchDEMUX. 
+# This script performs certification for PatchDEMUX. 
 #
 # Features:
 # - Can be configured to run different architectures (i.e., Resnet, ViT) and different datasets (i.e., MSCOCO, PASCALVOC)
-# - Runs either the defended clean setting or the undefended clean setting (i.e., without PatchDEMUX activated)
+# - Also runs location-aware certification
 #
-# Usage: sbatch inference.slurm
+# Usage: sbatch certify.slurm
 
-#SBATCH --job-name=inference_patchdemux
+#SBATCH --job-name=certify_patchdemux
 #SBATCH --output=slurm-%A.%a.out # stdout file
 #SBATCH --error=slurm-%A.%a.err  # stderr file
 
@@ -24,14 +24,17 @@
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
-#SBATCH --mail-user=djacob@princeton.edu
+#SBATCH --mail-user=YOUR_EMAIL_HERE
 
 # Start the conda environment
 module purge
 module load anaconda3/2022.10
 source activate torch-env
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.conda/envs/torch-env/lib 
+
+# Replace with your project path, e.g., "/scratch/gpfs/username/patchdemux"
+SCRATCH_DIR="YOUR_PATH_HERE"
 
 # Model parameters
 ARCH="resnet"
@@ -52,12 +55,12 @@ MASK_NUMBER=6
 DATASET_NAME="mscoco"
 
 if [[ "$DATASET_NAME" == "mscoco" ]]; then
-    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
-    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+    DATA_DIR="${SCRATCH_DIR}/coco/"
+    CONFIG="${SCRATCH_DIR}/checkpoints/mscoco/transformer/config_new.json"
     NUM_CLASSES=80
 elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
-    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
-    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/pascalvoc/transformer/config_new.json"
+    DATA_DIR="${SCRATCH_DIR}/pascal-voc/"
+    CONFIG="${SCRATCH_DIR}/checkpoints/pascalvoc/transformer/config_new.json"
     NUM_CLASSES=20
 fi
 
@@ -69,7 +72,7 @@ TOTAL_NUM_GPU=8
 TRIAL=1
 
 # Trained model specifics
-DEF_FINETUNE="false" 
+DEF_FINETUNE="true" 
 
 if [[ "$DEF_FINETUNE" == "true" ]]; then
     EPOCH=0
@@ -88,9 +91,9 @@ if [[ "$ARCH" == "ViT" ]]; then
     MODEL_NAME="Q2L-CvT_w24-384"
 
     if [[ "$DEF_FINETUNE" == "true" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-31-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
+        MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-31-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
     elif [[ "$DEF_FINETUNE" == "false" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
+        MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/transformer/checkpoint.pkl"
     fi
     
 elif [[ "$ARCH" == "resnet" ]]; then
@@ -98,35 +101,29 @@ elif [[ "$ARCH" == "resnet" ]]; then
     MODEL_NAME="tresnet_l"
 
     if [[ "$DEF_FINETUNE" == "true" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/resnet_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-15-2024/trial_1/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
+        MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/resnet_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-15-2024/trial_1/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
     elif [[ "$DEF_FINETUNE" == "false" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
+        MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
     fi
 
 fi
 
 # Type of run
-RUN_TYPE="defended"
 THRE_ARR=(0.8)
-
-if [[ "$RUN_TYPE" == "defended" ]]; then
-    DEFENSE_STATUS="--defense"
-elif [[ "$RUN_TYPE" == "undefended" ]]; then
-    DEFENSE_STATUS="--no-defense"
-fi
+ATTACKER_TYPE="worst_case"
 
 for THRE in ${THRE_ARR[@]};
 do
     # Build the python command with conditional config parameter
-    PYTHON_CMD="python inference/pd_infer.py $DATA_DIR --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
-
+    PYTHON_CMD="python certify/pd_certify.py $DATA_DIR --dataset-name $DATASET_NAME --num-classes $NUM_CLASSES --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-name $MODEL_NAME --model-path $MODEL_PATH"
+    
     # Add config parameter only for ViT models
     if [[ "$ARCH" == "ViT" ]]; then
         PYTHON_CMD="$PYTHON_CMD --config $CONFIG"
     fi
-
-    PYTHON_CMD="$PYTHON_CMD --thre $THRE $DEFENSE_STATUS --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE"
-
+    
+    PYTHON_CMD="$PYTHON_CMD --thre $THRE --attacker-type $ATTACKER_TYPE --patch-size $PATCH_SIZE --mask-number $MASK_NUMBER --world-gpu-id $WORLD_GPU_ID --total-num-gpu $TOTAL_NUM_GPU --trial $TRIAL --trial-type $TRIAL_TYPE"
+    
     # Execute the command
     $PYTHON_CMD
 done

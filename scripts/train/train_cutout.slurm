@@ -26,14 +26,19 @@
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
-#SBATCH --mail-user=djacob@princeton.edu
+#SBATCH --mail-user=YOUR_EMAIL_HERE
 
 # Start the conda environment
 module purge
 module load anaconda3/2022.10
 source activate torch-env
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.conda/envs/torch-env/lib 
+
+# Replace with your project path, e.g., "/scratch/gpfs/username/patchdemux"
+SCRATCH_DIR="YOUR_PATH_HERE"
+# Replace with your repository path, e.g., "/home/username/patchdemux"
+REPO_DIR="YOUR_REPO_PATH_HERE"
 
 # Model parameters
 ARCH="ViT"
@@ -53,23 +58,23 @@ LR_SCHEDULER="onecyclelr"
 EMA_DECAY_RATE=0.9997
 
 # MSCOCO dataset info
-DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
-CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+DATA_DIR="${SCRATCH_DIR}/coco/"
+CONFIG="${SCRATCH_DIR}/checkpoints/mscoco/transformer/config_new.json"
 NUM_CLASSES=80
 
 # Misc.
 TRIAL=2
-CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
+CACHE_DIR="${SCRATCH_DIR}"
 
 # Model weight locations
 if [[ "$ARCH" == "ViT" ]]; then
-    # ViT weights
+    # ViT weights - use vanilla checkpoints for training
     MODEL_NAME="Q2L-CvT_w24-384"
-    MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
+    MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/transformer/checkpoint.pkl"
 elif [[ "$ARCH" == "resnet" ]]; then
-    # ResNet weights
+    # ResNet weights - use vanilla checkpoints for training
     MODEL_NAME="tresnet_l"
-    MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
+    MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
 fi
 
 # Cutout info - configure cutout type here
@@ -78,7 +83,7 @@ CUTOUT_TYPE="greedycutout"
 if [[ "$CUTOUT_TYPE" == "randomcutout" ]]; then
     CUTOUT_SIZE=192
 elif [[ "$CUTOUT_TYPE" == "greedycutout" ]]; then
-    GREEDY_CUTOUT_PATH="/home/djacob/multi-label-patchcleanser/dump/greedy_cutout/mscoco/patch_55_masknumfr_6_masknumsr_6/ViT/08-25-2024/trial_2_vanilla/gpu_world_id_0/greedy_cutout_dict.json"
+    GREEDY_CUTOUT_PATH="${REPO_DIR}/dump/greedy_cutout/mscoco/patch_55_masknumfr_6_masknumsr_6/ViT/08-25-2024/trial_2_vanilla/gpu_world_id_0/greedy_cutout_dict.json"
 fi
 
 # Build the python command with conditional config parameter

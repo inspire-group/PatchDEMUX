@@ -22,17 +22,20 @@
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
-#SBATCH --mail-user=djacob@princeton.edu
+#SBATCH --mail-user=YOUR_EMAIL_HERE
 
 # Start the conda environment
 module purge
 module load anaconda3/2022.10
 source activate torch-env
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.conda/envs/torch-env/lib 
+
+# Replace with your project path, e.g., "/scratch/gpfs/username/patchdemux"
+SCRATCH_DIR="YOUR_PATH_HERE"
 
 # Path locations and thresholds
-CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
+CACHE_DIR="${SCRATCH_DIR}"
 CACHED_OUTPUTS=${CACHE_DIR}/cached_outputs/mscoco/ViT/patch_55_masknum_6/08-22-2025/trial_1_greedycutout_patch_55_masknum_6_training_onecyclelr_mixedprec_ema_epoch0/cached_outputs
 
 THRE_ARR_STD=(0.0 0.1 0.2 0.3 0.4 0.5 0.6 0.7 0.8 0.9 0.91 0.92 0.93 0.94 0.95 0.96 0.97 0.98 0.99)

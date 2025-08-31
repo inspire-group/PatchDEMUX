@@ -47,7 +47,7 @@ parser.add_argument('-b', '--batch-size', default=64, type=int, help='mini-batch
 # Model specifics
 available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
 parser.add_argument('--model-name', choices=available_models, default='tresnet_l')
-parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
+parser.add_argument('--model-path', type=str)
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 
@@ -69,7 +69,7 @@ parser.add_argument('--ema-decay-rate', default=0.9997, type=float, help='expect
 
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
-parser.add_argument('--cache-dir', default='/scratch/gpfs/djacob/multi-label-patchcleanser', type=str, help='directory for cached outputs (default: /scratch/gpfs/djacob/multi-label-patchcleanser)')
+parser.add_argument('--cache-dir', type=str, help='directory for storing checkpoints')
 
 def main():
     args = parser.parse_args()

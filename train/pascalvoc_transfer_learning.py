@@ -35,7 +35,7 @@ parser.add_argument('-j', '--workers', default=1, type=int, metavar='N',
 parser.add_argument('-b', '--batch-size', default=64, type=int, help='mini-batch size (default: 64)')
 
 # Model specifics
-# NOTE: This script only supports transfer learning for ViT-based models. PASCALVOC transfer learning
+# NOTE: This script only supports transfer learning for ViT-based models. PASCALVOC transfer learning can be done
 # for Resnet models by adjusting the relevant layers in lines 87 through 102.
 available_models = ['Q2L-CvT_w24-384']
 parser.add_argument('--model-name', choices=available_models, default='Q2L-CvT_w24-384')
@@ -56,7 +56,7 @@ parser.add_argument('--ema-decay-rate', default=0.9997, type=float, help='expect
 
 # Miscellaneous
 parser.add_argument('--trial', default=1, type=int, help='trial (default: 1)')
-parser.add_argument('--cache-dir', default='/scratch/gpfs/djacob/multi-label-patchcleanser', type=str, help='directory for cached outputs (default: /scratch/gpfs/djacob/multi-label-patchcleanser)')
+parser.add_argument('--cache-dir', type=str, help='directory for storing checkpoints')
 
 def main():
     args = parser.parse_args()

@@ -22,14 +22,17 @@
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
-#SBATCH --mail-user=djacob@princeton.edu
+#SBATCH --mail-user=YOUR_EMAIL_HERE
 
 # Start the conda environment
 module purge
 module load anaconda3/2022.10
 source activate torch-env
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.conda/envs/torch-env/lib 
+
+# Replace with your project path, e.g., "/scratch/gpfs/username/patchdemux"
+SCRATCH_DIR="YOUR_PATH_HERE"
 
 # Model parameters
 ARCH="ViT"
@@ -43,15 +46,15 @@ LR_SCHEDULER="onecyclelr"
 EMA_DECAY_RATE=0.9997
 
 # PASCAL VOC dataset info
-DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
+DATA_DIR="${SCRATCH_DIR}/pascal-voc/"
 
 # Misc.
 TRIAL=2
-CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
+CACHE_DIR="${SCRATCH_DIR}"
 
 # ViT model weight locations - start with base MSCOCO checkpoints and then finetune for the PASCAL VOC task
 MODEL_NAME="Q2L-CvT_w24-384"
-MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
-CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/transformer/checkpoint.pkl"
+CONFIG="${SCRATCH_DIR}/checkpoints/mscoco/transformer/config_new.json"
 
 python train/pascalvoc_transfer_learning.py $DATA_DIR --image-size $IMAGE_SIZE --batch-size $BATCH_SIZE --model-path $MODEL_PATH --model-name $MODEL_NAME --config $CONFIG --lr $LR $AMP --lr-scheduler $LR_SCHEDULER --ema-decay-rate $EMA_DECAY_RATE --trial $TRIAL --cache-dir $CACHE_DIR

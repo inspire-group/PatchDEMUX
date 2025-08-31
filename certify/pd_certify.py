@@ -37,7 +37,7 @@ parser.add_argument('-b', '--batch-size', default=32, type=int, help='mini-batch
 # Model specifics
 available_models = ['tresnet_l', 'Q2L-CvT_w24-384']
 parser.add_argument('--model-name', choices=available_models, default='tresnet_l')
-parser.add_argument('--model-path', default='./TRresNet_L_448_86.6.pth', type=str)
+parser.add_argument('--model-path', type=str)
 parser.add_argument('--thre', default=0.8, type=float, help='threshold value')
 parser.add_argument('--pretrained', dest='pretrained', action='store_true', help='use pre-trained model. default is False. ')
 parser.add_argument('--attacker-type', choices=["worst_case", "FN_attacker", "FP_attacker"], default="worst_case")

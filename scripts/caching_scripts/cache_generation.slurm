@@ -25,14 +25,17 @@
 #SBATCH --mail-type=begin        # send email when job begins
 #SBATCH --mail-type=end          # send email when job ends
 #SBATCH --mail-type=fail         # send email if job fails
-#SBATCH --mail-user=djacob@princeton.edu
+#SBATCH --mail-user=YOUR_EMAIL_HERE
 
 # Start the conda environment
 module purge
 module load anaconda3/2022.10
 source activate torch-env
 
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/home/djacob/.conda/envs/torch-env/lib 
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:~/.conda/envs/torch-env/lib 
+
+# Replace with your project path, e.g., "/scratch/gpfs/username/patchdemux"
+SCRATCH_DIR="YOUR_PATH_HERE"  
 
 # Model parameters
 ARCH="ViT"
@@ -53,12 +56,12 @@ MASK_NUMBER=6
 DATASET_NAME="mscoco"
 
 if [[ "$DATASET_NAME" == "mscoco" ]]; then
-    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/coco/"
-    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/config_new.json"
+    DATA_DIR="${SCRATCH_DIR}/coco/"
+    CONFIG="${SCRATCH_DIR}/checkpoints/mscoco/transformer/config_new.json"
     NUM_CLASSES=80
 elif [[ "$DATASET_NAME" == "pascalvoc" ]]; then
-    DATA_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser/pascal-voc/"
-    CONFIG="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/pascalvoc/transformer/config_new.json"
+    DATA_DIR="${SCRATCH_DIR}/pascal-voc/"
+    CONFIG="${SCRATCH_DIR}/checkpoints/pascalvoc/transformer/config_new.json"
     NUM_CLASSES=20
 fi
 
@@ -68,7 +71,7 @@ TOTAL_NUM_GPU=16
 
 # Misc.
 TRIAL=1
-CACHE_DIR="/scratch/gpfs/djacob/multi-label-patchcleanser"
+CACHE_DIR="${SCRATCH_DIR}"
 
 # Trained model specifics
 DEF_FINETUNE="true" 
@@ -90,9 +93,9 @@ if [[ "$ARCH" == "ViT" ]]; then
     MODEL_NAME="Q2L-CvT_w24-384"
 
     if [[ "$DEF_FINETUNE" == "true" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-31-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
+        MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/ViT_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-31-2024/trial_2/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
     elif [[ "$DEF_FINETUNE" == "false" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/transformer/checkpoint.pkl"
+        MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/transformer/checkpoint.pkl"
     fi
     
 elif [[ "$ARCH" == "resnet" ]]; then
@@ -100,9 +103,9 @@ elif [[ "$ARCH" == "resnet" ]]; then
     MODEL_NAME="tresnet_l"
 
     if [[ "$DEF_FINETUNE" == "true" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/resnet_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-15-2024/trial_1/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
+        MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/resnet_trained/${CUTOUT_TYPE}/${CUTOUT_INFO}/${TRAIN_INFO}/08-15-2024/trial_1/epoch_${EPOCH}/ema-model-epoch-${EPOCH}.pth"
     elif [[ "$DEF_FINETUNE" == "false" ]]; then
-        MODEL_PATH="/scratch/gpfs/djacob/multi-label-patchcleanser/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
+        MODEL_PATH="${SCRATCH_DIR}/checkpoints/mscoco/MS_COCO_TRresNet_L_448_86.6.pth"
     fi
 
 fi
