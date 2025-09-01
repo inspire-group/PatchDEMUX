@@ -73,7 +73,7 @@ patchdemux/
 ## Usage
 Evaluations are done using SLURM job scripts, which automatically populate the required arguments for the Python scripts. The SLURM parameters can be modified based on the desired experiment.
 
-A key feature of the project is the presence of a caching API and a non-caching API. Many experiments can take a while to run; we thus provide the option to cache multi-label model outputs ahead of time, which can be used later when sweeping model thresholds for certification, inference, etc. To generate cached model outputs, run `preprocessing/generate_cached_outputs.py`. Then, run any of the scripts within the repository suffixed with the word *cached*. Note that while both APIs have strong quantitative agreement, the raw outputs are not always the exact same, likely due to rounding errors. 
+A key feature of the project is the presence of a caching API and a non-caching API. Many experiments can take a while to run; we thus provide the option to cache multi-label model outputs ahead of time, which can be used later when sweeping model thresholds for certification, inference, etc. To generate cached model outputs, run `preprocessing/generate_cached_outputs.py`. Then, run any of the scripts within the repository suffixed with the word *cached*. Note that while both APIs mostly agree quantitatively, the raw outputs are not always the exact same, likely due to rounding errors. 
 
 If anything is unclear, feel free to contact Dennis Jacob (djacob18@berkeley.edu)!
 
