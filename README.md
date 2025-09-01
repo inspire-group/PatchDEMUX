@@ -78,7 +78,7 @@ A key feature of the project is the presence of a caching API and a non-caching 
 If anything is unclear, feel free to contact Dennis Jacob (djacob18@berkeley.edu)!
 
 ## Models
-Supports both ResNet (TResNet-L) and Vision Transformer (Q2L-CvT) architectures for multi-label classification. Model checkpoints are available at the following [Box location](https://berkeley.box.com/s/qjbi2p0vkxlhxmp4ms6zpiclhwz54e6o).
+Supports both ResNet (TResNet-L) and Vision Transformer (Q2L-CvT) architectures for multi-label classification. Model checkpoints are available at the following [Box folder](https://berkeley.box.com/s/qjbi2p0vkxlhxmp4ms6zpiclhwz54e6o).
 
 ## Citations
 If you find our work to be useful, please consider citing:
